@@ -9,6 +9,11 @@ venv/
 # Environment variables
 .env
 
+# Node
+node_modules/
+dist/
+
+
 # VS Code
 .vscode/
 
