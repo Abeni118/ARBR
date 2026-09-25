@@ -1,5 +1,3 @@
-import os
-
 import paramiko
 
 
@@ -29,7 +27,7 @@ class HostControl:
                 timeout=10,
             )
 
-            stdin, stdout, stderr = client.exec_command(command)
+            _, stdout, stderr = client.exec_command(command)
 
             exit_code = stdout.channel.recv_exit_status()
             output = stdout.read().decode().strip()
