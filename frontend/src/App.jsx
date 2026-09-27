@@ -8,7 +8,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { Check } from 'lucide-react'
+import { Check, X } from 'lucide-react'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { metrics, riskTrend, securityEvents } from './data/dashboardData.js'
 import {
   ActionPanel,
@@ -18,6 +19,7 @@ import {
   MetricCard,
   Sidebar,
 } from './components/DashboardParts.jsx'
+import SecurityEventsPage from './pages/SecurityEventsPage.jsx'
 import './App.css'
 
 function RiskTooltip({ active, payload, label }) {
@@ -67,19 +69,16 @@ function StatusFooter() {
   )
 }
 
-function App() {
+function DashboardPage({ globalSearch, onGlobalSearchChange }) {
   const [period, setPeriod] = useState('24H')
-  const [query, setQuery] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
-  const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [actionState, setActionState] = useState('')
 
   const filteredEvents = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
+    const normalizedQuery = globalSearch.trim().toLowerCase()
     if (!normalizedQuery) return securityEvents
     return securityEvents.filter((event) => Object.values(event).some((value) => String(value).toLowerCase().includes(normalizedQuery)))
-  }, [query])
+  }, [globalSearch])
 
   const exportEvents = () => {
     const headers = ['Event ID', 'Timestamp', 'Source IP/Host', 'Event Category', 'Severity', 'Status']
@@ -94,29 +93,41 @@ function App() {
   }
 
   return (
+    <main className="dashboard-main">
+      <section className="overview-heading">
+        <div className="overview-title"><h1>Operational Overview</h1><p>SOC Command Center | Security Node: Alpha-01</p></div>
+        <DashboardToolbar period={period} onPeriodChange={setPeriod} filterOpen={filterOpen} onFilter={() => setFilterOpen((current) => !current)} onExport={exportEvents} />
+      </section>
+      <section className="metric-grid" aria-label="System security metrics">
+        {metrics.map((metric) => <MetricCard key={metric.label} metric={metric} />)}
+      </section>
+      <div className="dashboard-grid"><RiskTrendChart /><ActionPanel actionState={actionState} onAction={setActionState} /></div>
+      <EventsTable events={filteredEvents} onViewAll={() => onGlobalSearchChange('')} />
+      <StatusFooter />
+      {actionState && <div className="action-toast" role="status"><Check size={14} /> {actionState === 'isolate' ? 'System isolation protocol initiated' : actionState === 'snapshot' ? 'Immutable snapshot deployment started' : 'Point-in-time recovery verified'}</div>}
+    </main>
+  )
+}
+
+function App() {
+  const location = useLocation()
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [toast, setToast] = useState('')
+  const [globalSearch, setGlobalSearch] = useState('')
+  const isSecurityEventsPage = location.pathname === '/security-events'
+
+  return (
     <div className="app-shell">
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((current) => !current)} />
       <div className="main-shell">
-        <HeaderBar onSearch={setQuery} notificationOpen={notificationsOpen} onToggleNotifications={() => setNotificationsOpen((current) => !current)} />
-        <main className="dashboard-main">
-          <section className="overview-heading">
-            <div className="overview-title"><h1>Operational Overview</h1><p>SOC Command Center | Security Node: Alpha-01</p></div>
-            <DashboardToolbar period={period} onPeriodChange={setPeriod} filterOpen={filterOpen} onFilter={() => setFilterOpen((current) => !current)} onExport={exportEvents} />
-          </section>
-
-          <section className="metric-grid" aria-label="System security metrics">
-            {metrics.map((metric) => <MetricCard key={metric.label} metric={metric} />)}
-          </section>
-
-          <div className="dashboard-grid">
-            <RiskTrendChart />
-            <ActionPanel actionState={actionState} onAction={setActionState} />
-          </div>
-
-          <EventsTable events={filteredEvents} onViewAll={() => setQuery('')} />
-          <StatusFooter />
-          {actionState && <div className="action-toast" role="status"><Check size={14} /> {actionState === 'isolate' ? 'System isolation protocol initiated' : actionState === 'snapshot' ? 'Immutable snapshot deployment started' : 'Point-in-time recovery verified'}</div>}
-        </main>
+        <HeaderBar pageTitle={isSecurityEventsPage ? 'Security Events' : 'Threat Detection'} searchValue={globalSearch} onSearch={setGlobalSearch} notificationOpen={notificationsOpen} onToggleNotifications={() => setNotificationsOpen((current) => !current)} />
+        <Routes>
+          <Route path="/" element={<DashboardPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />} />
+          <Route path="/security-events" element={<SecurityEventsPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        {toast && <div className="action-toast" role="status"><Check size={14} />{toast}<button aria-label="Dismiss notification" onClick={() => setToast('')}><X size={13} /></button></div>}
       </div>
     </div>
   )

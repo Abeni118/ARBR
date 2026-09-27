@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
 import { navigationItems } from '../data/dashboardData.js'
 
 const iconMap = {
@@ -41,6 +42,7 @@ const iconMap = {
 }
 
 export function Sidebar({ collapsed, onToggle }) {
+  const location = useLocation()
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <div className="brand">
@@ -53,13 +55,12 @@ export function Sidebar({ collapsed, onToggle }) {
       <nav className="side-nav" aria-label="Main navigation">
         {navigationItems.map(({ label, icon }) => {
           const Icon = iconMap[icon]
-          return (
-            <button className={`nav-link ${label === 'Dashboard' ? 'nav-link--active' : ''}`} key={label}>
-              <Icon size={14} strokeWidth={1.8} />
-              <span>{label}</span>
-              {label === 'Dashboard' && <ChevronRight className="nav-chevron" size={12} />}
-            </button>
-          )
+          const path = label === 'Dashboard' ? '/' : label === 'Security Events' ? '/security-events' : null
+          const active = path === '/' ? location.pathname === '/' : path === location.pathname
+          const contents = <><Icon size={14} strokeWidth={1.8} /><span>{label}</span>{active && <ChevronRight className="nav-chevron" size={12} />}</>
+          return path
+            ? <Link className={`nav-link ${active ? 'nav-link--active' : ''}`} key={label} to={path} aria-label={label} title={label} aria-current={active ? 'page' : undefined}>{contents}</Link>
+            : <button className="nav-link" key={label} type="button" aria-label={label} title={label}>{contents}</button>
         })}
       </nav>
       <div className="sidebar-user">
@@ -71,7 +72,7 @@ export function Sidebar({ collapsed, onToggle }) {
   )
 }
 
-export function HeaderBar({ onSearch, notificationOpen, onToggleNotifications }) {
+export function HeaderBar({ pageTitle = 'Threat Detection', searchValue = '', onSearch, notificationOpen, onToggleNotifications }) {
   return (
     <header className="topbar">
       <div className="breadcrumbs">
@@ -79,12 +80,12 @@ export function HeaderBar({ onSearch, notificationOpen, onToggleNotifications })
         <span>Dashboard</span>
         <ChevronRight size={12} />
         <Shield size={13} />
-        <strong>Threat Detection</strong>
+        <strong>{pageTitle}</strong>
       </div>
       <div className="topbar-tools">
         <label className="search-box">
           <Search size={13} />
-          <input type="search" placeholder="Search threats, systems..." onChange={(event) => onSearch(event.target.value)} />
+          <input type="search" placeholder="Search threats, systems..." value={searchValue} onChange={(event) => onSearch?.(event.target.value)} />
           <kbd>/</kbd>
         </label>
         <button className={`icon-button notification-button ${notificationOpen ? 'is-active' : ''}`} aria-label="Notifications" onClick={onToggleNotifications}>
