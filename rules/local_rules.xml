@@ -1,0 +1,106 @@
+<!--
+  Custom ransomware-detection rules for Wazuh.
+  Member 1 (Wazuh & Detection) - attack-resistant-backup-recovery project
+
+  Install path inside the wazuh.manager container:
+    /var/ossec/etc/rules/local_rules.xml
+
+  After editing, restart the manager:
+    /var/ossec/bin/wazuh-control restart
+
+  Group ID range 100100-100199 is reserved here to avoid colliding with
+  Wazuh's built-in rule IDs (0-99999) or other custom rule sets.
+-->
+
+<group name="local,syscheck,ransomware,">
+
+  <!--
+    Base rule: any single FIM event we want to track for correlation.
+    Wazuh's built-in syscheck rules (550, 554, 594, etc.) already fire
+    for individual file adds/modifies/deletes. We add this rule as a
+    "parent" match so we can build frequency rules on top of it without
+    re-parsing syscheck output ourselves.
+  -->
+  <rule id="100100" level="3">
+    <if_group>syscheck</if_group>
+    <description>File integrity event tracked for ransomware correlation.</description>
+    <group>ransomware_watch,</group>
+  </rule>
+
+  <!--
+    Mass file modification: N+ file events from the same agent within
+    a short window. This is the core "many files touched fast" signal.
+    frequency/timeframe are conservative defaults for a demo/test env;
+    tune these against real endpoint baselines before calling them final.
+  -->
+  <rule id="100101" level="12" frequency="15" timeframe="20">
+    <if_matched_sid>100100</if_matched_sid>
+    <same_source_ip />
+    <description>Possible ransomware activity: mass file modification burst detected (15+ file events in 20s).</description>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+    <group>ransomware_detected,mass_file_change,</group>
+  </rule>
+
+  <!--
+    Suspicious extension pattern: files renamed/created with common
+    ransomware extensions. Matches on the full_log text Wazuh emits
+    for syscheck events, which includes the file path.
+  -->
+  <rule id="100102" level="14">
+    <if_group>syscheck</if_group>
+    <field name="file" type="pcre2">(?i)\.(locked|encrypted|crypt|enc|ransom|wcry|wncry|locky|cerber|zzz|micro)$</field>
+    <description>Ransomware-pattern file extension detected: $(file)</description>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+    <group>ransomware_detected,suspicious_extension,</group>
+  </rule>
+
+  <!--
+    Ransom note creation: new .txt/.html files appearing with
+    ransom-note-like names, a very common ransomware behavioral tell.
+  -->
+  <rule id="100103" level="14">
+    <if_group>syscheck</if_group>
+    <field name="file" type="pcre2">(?i)(readme|decrypt|how_to|restore_files|ransom).*\.(txt|html|hta)$</field>
+    <description>Possible ransom note file created: $(file)</description>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+    <group>ransomware_detected,ransom_note,</group>
+  </rule>
+
+  <!--
+    Composite/highest-confidence rule: a mass-change burst (100101)
+    AND a suspicious-extension hit (100102) from the same agent close
+    together. This is the alert we expect Member 2's Risk Engine to
+    treat as highest priority.
+  -->
+  <rule id="100104" level="15" frequency="1" timeframe="30">
+    <if_matched_sid>100101</if_matched_sid>
+    <if_matched_sid>100102</if_matched_sid>
+    <description>HIGH CONFIDENCE: Ransomware behavior confirmed - mass file changes combined with known-bad extension pattern.</description>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+    <group>ransomware_confirmed,critical,</group>
+  </rule>
+
+  <!--
+    Shadow copy / backup deletion attempts (Windows) - classic
+    ransomware move to prevent recovery. Matches on command-line
+    logging (requires Wazuh command monitoring or Sysmon integration
+    to actually populate full_log with the command text).
+  -->
+  <rule id="100105" level="15">
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(vssadmin\s+delete\s+shadows|wbadmin\s+delete\s+catalog|bcdedit.*recoveryenabled\s+no)</field>
+    <description>Backup/shadow-copy deletion command detected - strong ransomware indicator.</description>
+    <mitre>
+      <id>T1490</id>
+    </mitre>
+    <group>ransomware_detected,backup_deletion,</group>
+  </rule>
+
+</group>
