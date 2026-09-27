@@ -1,49 +1,73 @@
-import os
-import subprocess
 import logging
-import platform
+import subprocess
 
-# Configure logging for recovery events
+
 logging.basicConfig(
-    filename='recovery.log',
+    filename="recovery.log",
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-def restore_system():
-    """
-    Detects the operating system and resets firewall rules 
-    to restore full network connectivity after an incident is resolved.
-    """
-    current_os = platform.system()
-    logging.info(f"INFO: Recovery protocol triggered on {current_os}.")
-    print(f"[*] INFO: Recovery protocol initiated on {current_os}...")
+
+TABLE = "arbr_isolation"
+
+
+def run_nft(command: str) -> None:
+    subprocess.run(
+        ["sudo", "-n", "nft", *command.split()],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def restore_project_firewall() -> bool:
+    """Restore the project's nftables isolation rules."""
 
     try:
-        if current_os == "Windows":
-            print("[*] Resetting Windows Firewall policies to default...")
-            # Reset firewall to default state (allowing traffic again)
-            subprocess.run(["netsh", "advfirewall", "reset"], check=True, capture_output=True)
-            # Restore default firewall policy (allow outbound, block inbound by default)
-            subprocess.run(["netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "allowinbound,allowoutbound"], check=True, capture_output=True)
-            
-        elif current_os == "Linux":
-            print("[*] Flushing iptables rules and restoring default policies...")
-            # Flush existing rules and reset policies back to ACCEPT (requires root/sudo)
-            subprocess.run(["sudo", "iptables", "-F"], check=True)
-            subprocess.run(["sudo", "iptables", "-P", "INPUT", "ACCEPT"], check=True)
-            subprocess.run(["sudo", "iptables", "-P", "OUTPUT", "ACCEPT"], check=True)
-            subprocess.run(["sudo", "iptables", "-P", "FORWARD", "ACCEPT"], check=True)
-            
-        else:
-            raise Exception(f"Unsupported operating system: {current_os}")
+        logging.info("Starting project firewall recovery.")
 
-        logging.info(f"System successfully restored to normal state on {current_os}.")
-        print(f"[+] System successfully restored on {current_os}.")
-        
-    except Exception as e:
-        logging.error(f"Failed to restore system: {e}")
-        print(f"[-] Error during recovery: {e}")
+        run_nft(f"flush chain inet {TABLE} input")
+        run_nft(f"flush chain inet {TABLE} output")
+
+        run_nft(
+            f"add rule inet {TABLE} input "
+            "iifname lo accept"
+        )
+
+        run_nft(
+            f"add rule inet {TABLE} input "
+            "ct state established,related accept"
+        )
+
+        run_nft(
+            f"add rule inet {TABLE} input "
+            "ip saddr 192.168.56.1 tcp dport 22 accept"
+        )
+
+        run_nft(
+            f"add rule inet {TABLE} output "
+            "oifname lo accept"
+        )
+
+        run_nft(
+            f"add rule inet {TABLE} output "
+            "ct state established,related accept"
+        )
+
+        logging.info("Project firewall successfully restored.")
+        return True
+
+    except subprocess.CalledProcessError as error:
+        logging.error(
+            "Project firewall recovery failed: %s",
+            error,
+        )
+        return False
+
 
 if __name__ == "__main__":
-    restore_system()
+    if restore_project_firewall():
+        print("[+] Project firewall restored successfully.")
+    else:
+        print("[-] Project firewall recovery failed.")
