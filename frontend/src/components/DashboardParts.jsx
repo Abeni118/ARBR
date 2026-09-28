@@ -55,7 +55,7 @@ export function Sidebar({ collapsed, onToggle }) {
       <nav className="side-nav" aria-label="Main navigation">
         {navigationItems.map(({ label, icon }) => {
           const Icon = iconMap[icon]
-          const path = label === 'Dashboard' ? '/' : label === 'Security Events' ? '/security-events' : null
+          const path = label === 'Dashboard' ? '/' : label === 'Security Events' ? '/security-events' : label === 'Threat Detection' ? '/threat-detection' : null
           const active = path === '/' ? location.pathname === '/' : path === location.pathname
           const contents = <><Icon size={14} strokeWidth={1.8} /><span>{label}</span>{active && <ChevronRight className="nav-chevron" size={12} />}</>
           return path
