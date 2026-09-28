@@ -2,6 +2,7 @@ from pathlib import Path
 import shutil
 
 from backend.app.recovery.backup_verifier import BackupVerifier
+from backend.app.recovery.recovery_operation import RecoveryOperation
 from backend.app.recovery.restore_validator import RestoreValidator
 
 
@@ -21,24 +22,37 @@ class RecoveryManager:
         expected_hashes: dict[str, str],
         expected_files: list[str] | None = None,
     ) -> dict:
+        operation = RecoveryOperation(
+            backup_path,
+            restore_path,
+        )
+
         verification = self.backup_verifier.verify_backup(
             backup_path,
             expected_hashes,
         )
 
+        operation.verification = verification
+
         if not verification["trusted"]:
-            return {
-                "success": False,
-                "status": "RECOVERY_BLOCKED",
-                "reason": "BACKUP_NOT_TRUSTED",
-                "verification": verification,
-            }
+            operation.fail(
+                "RECOVERY_BLOCKED",
+                "Backup is not trusted.",
+            )
+
+            result = operation.to_dict()
+            result["success"] = False
+            result["reason"] = "BACKUP_NOT_TRUSTED"
+            return result
 
         backup = Path(backup_path)
         restore = Path(restore_path)
 
         try:
-            restore.mkdir(parents=True, exist_ok=True)
+            restore.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
             for item in backup.iterdir():
                 destination = restore / item.name
@@ -50,14 +64,20 @@ class RecoveryManager:
                         dirs_exist_ok=True,
                     )
                 else:
-                    shutil.copy2(item, destination)
+                    shutil.copy2(
+                        item,
+                        destination,
+                    )
 
         except (OSError, shutil.Error) as error:
-            return {
-                "success": False,
-                "status": "RESTORE_FAILED",
-                "error": str(error),
-            }
+            operation.fail(
+                "RESTORE_FAILED",
+                str(error),
+            )
+
+            result = operation.to_dict()
+            result["success"] = False
+            return result
 
         if expected_files is not None:
             validation = self.restore_validator.validate_files(
@@ -65,17 +85,20 @@ class RecoveryManager:
                 expected_files,
             )
 
-            if not validation["success"]:
-                return {
-                    "success": False,
-                    "status": "RESTORE_VALIDATION_FAILED",
-                    "validation": validation,
-                }
+            operation.validation = validation
 
-        return {
-            "success": True,
-            "status": "RECOVERY_COMPLETED",
-            "backup_path": str(backup),
-            "restore_path": str(restore),
-            "verification": verification,
-        }
+            if not validation["success"]:
+                operation.fail(
+                    "RESTORE_VALIDATION_FAILED",
+                    "Restored files failed validation.",
+                )
+
+                result = operation.to_dict()
+                result["success"] = False
+                return result
+
+        operation.complete()
+
+        result = operation.to_dict()
+        result["success"] = True
+        return result
