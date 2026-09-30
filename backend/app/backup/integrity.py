@@ -92,3 +92,44 @@ def verify_backup_integrity(file_path: str | Path, stored_hash: str) -> bool:
 
     logger.info("Integrity verified for %s", file_path)
     return True
+def calculate_directory_sha256(directory_path: str | Path) -> str:
+    """
+    Calculate a deterministic SHA-256 hash of a directory tree.
+
+    Hashes the sorted list of (relative_path, file_hash) pairs, so the
+    result depends only on directory contents — not on the order the OS
+    happens to enumerate files. This is what makes it a "backup identity":
+    the same backup always hashes to the same value.
+
+    Args:
+        directory_path: Root directory to hash.
+
+    Returns:
+        Hex digest (64 characters).
+
+    Raises:
+        FileNotFoundError: If the directory does not exist.
+        NotADirectoryError: If the path points to a file.
+    """
+    root = Path(directory_path)
+
+    if not root.exists():
+        raise FileNotFoundError(f"Backup directory not found: {root}")
+
+    if not root.is_dir():
+        raise NotADirectoryError(f"Path is not a directory: {root}")
+
+    entries: list[tuple[str, str]] = []
+    for item in sorted(root.rglob("*")):
+        if item.is_file():
+            relative = item.relative_to(root).as_posix()
+            entries.append((relative, calculate_sha256(item)))
+
+    master = hashlib.sha256()
+    for relative, file_hash in entries:
+        master.update(relative.encode("utf-8"))
+        master.update(b"\0")
+        master.update(file_hash.encode("utf-8"))
+        master.update(b"\0")
+
+    return master.hexdigest()
