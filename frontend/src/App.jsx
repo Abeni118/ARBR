@@ -21,6 +21,8 @@ import {
 } from './components/DashboardParts.jsx'
 import SecurityEventsPage from './pages/SecurityEventsPage.jsx'
 import ThreatDetectionPage from './pages/ThreatDetectionPage.jsx'
+import RiskAnalysisPage from './pages/RiskAnalysisPage.jsx'
+import BackupsPage from './pages/BackupsPage.jsx'
 import './App.css'
 
 function RiskTooltip({ active, payload, label }) {
@@ -118,7 +120,9 @@ function App() {
   const [globalSearch, setGlobalSearch] = useState('')
   const isSecurityEventsPage = location.pathname === '/security-events'
   const isThreatDetectionPage = location.pathname === '/threat-detection'
-  const pageTitle = isSecurityEventsPage ? 'Security Events' : isThreatDetectionPage ? 'Threat Detection' : 'Dashboard'
+  const isRiskAnalysisPage = location.pathname === '/risk-analysis'
+  const isBackupsPage = location.pathname === '/backups'
+  const pageTitle = isSecurityEventsPage ? 'Security Events' : isThreatDetectionPage ? 'Threat Detection' : isRiskAnalysisPage ? 'Risk Analysis' : isBackupsPage ? 'Backups' : 'Dashboard'
 
   return (
     <div className="app-shell">
@@ -129,6 +133,8 @@ function App() {
           <Route path="/" element={<DashboardPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />} />
           <Route path="/security-events" element={<SecurityEventsPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
           <Route path="/threat-detection" element={<ThreatDetectionPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
+          <Route path="/risk-analysis" element={<RiskAnalysisPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
+          <Route path="/backups" element={<BackupsPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         {toast && <div className="action-toast" role="status"><Check size={14} />{toast}<button aria-label="Dismiss notification" onClick={() => setToast('')}><X size={13} /></button></div>}
