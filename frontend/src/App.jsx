@@ -23,6 +23,10 @@ import SecurityEventsPage from './pages/SecurityEventsPage.jsx'
 import ThreatDetectionPage from './pages/ThreatDetectionPage.jsx'
 import RiskAnalysisPage from './pages/RiskAnalysisPage.jsx'
 import BackupsPage from './pages/BackupsPage.jsx'
+import SystemIsolationPage from './pages/SystemIsolationPage.jsx'
+import RecoveryPage from './pages/RecoveryPage.jsx'
+import AuditLogsPage from './pages/AuditLogsPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
 import './App.css'
 
 function RiskTooltip({ active, payload, label }) {
@@ -122,7 +126,11 @@ function App() {
   const isThreatDetectionPage = location.pathname === '/threat-detection'
   const isRiskAnalysisPage = location.pathname === '/risk-analysis'
   const isBackupsPage = location.pathname === '/backups'
-  const pageTitle = isSecurityEventsPage ? 'Security Events' : isThreatDetectionPage ? 'Threat Detection' : isRiskAnalysisPage ? 'Risk Analysis' : isBackupsPage ? 'Backups' : 'Dashboard'
+  const isSystemIsolationPage = location.pathname === '/system-isolation'
+  const isRecoveryPage = location.pathname === '/recovery'
+  const isAuditLogsPage = location.pathname === '/audit-logs'
+  const isSettingsPage = location.pathname === '/settings'
+  const pageTitle = isSecurityEventsPage ? 'Security Events' : isThreatDetectionPage ? 'Threat Detection' : isRiskAnalysisPage ? 'Risk Analysis' : isBackupsPage ? 'Backups' : isSystemIsolationPage ? 'System Isolation' : isRecoveryPage ? 'Recovery' : isAuditLogsPage ? 'Audit Logs' : isSettingsPage ? 'System Settings' : 'Dashboard'
 
   return (
     <div className="app-shell">
@@ -135,6 +143,10 @@ function App() {
           <Route path="/threat-detection" element={<ThreatDetectionPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
           <Route path="/risk-analysis" element={<RiskAnalysisPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
           <Route path="/backups" element={<BackupsPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
+          <Route path="/system-isolation" element={<SystemIsolationPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
+          <Route path="/recovery" element={<RecoveryPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
+          <Route path="/audit-logs" element={<AuditLogsPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
+          <Route path="/settings" element={<SettingsPage onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         {toast && <div className="action-toast" role="status"><Check size={14} />{toast}<button aria-label="Dismiss notification" onClick={() => setToast('')}><X size={13} /></button></div>}

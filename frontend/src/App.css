@@ -47,6 +47,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outl
 .sidebar-toggle { display: none; margin-left: auto; }
 .side-nav { display: grid; gap: 1px; padding-top: 19px; }
 .nav-link { width: 100%; min-height: 20px; display: flex; gap: 8px; align-items: center; padding: 4px 7px; border: 0; border-radius: 2px; color: #d1d7e2; text-align: left; background: transparent; cursor: pointer; font-size: 9px; white-space: nowrap; }
+.sidebar .nav-link, .sidebar .nav-link:hover, .sidebar .nav-link:focus, .sidebar .nav-link:active, .sidebar .nav-link:visited { text-decoration: none; }
 .nav-link svg { flex: 0 0 auto; color: #b7c1d1; }
 .nav-link:hover { background: #1b2944; }
 .nav-link--active { background: #252b37; color: #fff; }
