@@ -1,5 +1,6 @@
 from backend.app.decision.actions import DecisionAction
 from backend.app.decision.action_executor import ActionExecutor
+from backend.app.decision.audit import DecisionAuditLog
 
 from backend.app.decision.decision_engine import (
     DecisionEngine,
@@ -151,9 +152,9 @@ def test_protection_action_calls_protection_handler():
     event = SecurityEvent(
         event_id="event-010",
         host_id="host-04",
-        threat_type="ransomware_behavior",
+        threat_type="suspicious_activity",
         risk_level=RiskLevel.HIGH,
-        risk_score=85.0,
+        risk_score=80.0,
     )
 
     decision = DecisionEngine().decide(event)
@@ -194,7 +195,7 @@ def test_alert_action_calls_alert_handler():
 
 
 def test_handler_exception_returns_failed_result():
-    def isolate(_decision):
+    def isolate(decision):
         raise RuntimeError("firewall unavailable")
 
     event = SecurityEvent(
@@ -214,6 +215,37 @@ def test_handler_exception_returns_failed_result():
     assert result.action == DecisionAction.ISOLATE
     assert result.success is False
     assert "firewall unavailable" in result.message
+
+
+def test_action_execution_creates_audit_record():
+    audit_log = DecisionAuditLog()
+
+    def isolate(decision):
+        return True
+
+    event = SecurityEvent(
+        event_id="event-013",
+        host_id="host-07",
+        threat_type="ransomware",
+        risk_level=RiskLevel.CRITICAL,
+        risk_score=98.0,
+    )
+
+    decision = DecisionEngine().decide(event)
+
+    result = ActionExecutor(
+        isolate_handler=isolate,
+        audit_log=audit_log,
+    ).execute(decision)
+
+    assert result.success is True
+
+    records = audit_log.for_event("event-013")
+
+    assert len(records) == 1
+    assert records[0].action == DecisionAction.ISOLATE
+    assert records[0].success is True
+
 
 def test_critical_event_does_not_recover_automatically():
     event = SecurityEvent(
