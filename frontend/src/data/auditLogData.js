@@ -15,14 +15,17 @@ const startTimes = ['2026-10-01 17:02:31', '2026-10-01 16:58:12', '2026-10-01 16
 
 export const auditLogRecords = Array.from({ length: 1284 }, (_, index) => {
   const seed = auditEventSeeds[index % auditEventSeeds.length]
-  const minutesAgo = Math.floor(index / auditEventSeeds.length) * 8
-  const timestamp = new Date(new Date(startTimes[index % startTimes.length].replace(' ', 'T') + 'Z').getTime() - minutesAgo * 60_000)
-    .toISOString().replace('T', ' ').slice(0, 19)
+  const firstPageTimestamp = new Date(startTimes[Math.min(index, startTimes.length - 1)].replace(' ', 'T') + 'Z')
+  const timestampDate = index < startTimes.length
+    ? firstPageTimestamp
+    : new Date(new Date(startTimes[startTimes.length - 1].replace(' ', 'T') + 'Z').getTime() - (index - startTimes.length + 1) * 6 * 60_000)
+  const timestamp = timestampDate.toISOString().replace('T', ' ').slice(0, 19)
+  const sampleIds = ['AUD-00982', 'AUD-00981', 'AUD-00980', 'AUD-00979', 'AUD-00978']
   return {
     ...seed,
-    id: `AUD-${String(982 + index).padStart(5, '0')}`,
+    id: sampleIds[index] ?? `AUD-${String(10000 + index).padStart(5, '0')}`,
     timestamp,
-    minutesAgo,
+    minutesAgo: index * 6,
   }
 })
 
