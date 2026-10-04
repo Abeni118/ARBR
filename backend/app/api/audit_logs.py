@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.common import get_or_404, paginate
+from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.models import AuditEvent
 from app.schemas import AuditEventRead, Page
@@ -40,9 +40,9 @@ def list_audit_events(
     if correlation_id:
         query = query.filter(AuditEvent.correlation_id == str(correlation_id))
     if from_:
-        query = query.filter(AuditEvent.occurred_at >= from_)
+        query = query.filter(AuditEvent.occurred_at >= as_utc(from_))
     if to:
-        query = query.filter(AuditEvent.occurred_at <= to)
+        query = query.filter(AuditEvent.occurred_at <= as_utc(to))
     return paginate(query.order_by(AuditEvent.occurred_at.desc()), page, page_size)
 
 

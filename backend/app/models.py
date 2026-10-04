@@ -7,7 +7,6 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
-    Index,
     Integer,
     String,
     Text,
@@ -44,7 +43,6 @@ class Asset(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "assets"
     __table_args__ = (
         UniqueConstraint("external_source", "external_id", name="uq_asset_external_ref"),
-        Index("ix_assets_hostname", "hostname"),
     )
 
     external_source: Mapped[str | None] = mapped_column(String(100))
@@ -59,6 +57,11 @@ class Asset(UUIDPrimaryKey, TimestampMixin, Base):
     security_events: Mapped[list["SecurityEvent"]] = relationship(back_populates="asset")
     threat_incidents: Mapped[list["ThreatIncident"]] = relationship(back_populates="asset")
     backups: Mapped[list["Backup"]] = relationship(back_populates="asset")
+    risk_assessments: Mapped[list["RiskAssessment"]] = relationship(back_populates="asset")
+    decisions: Mapped[list["Decision"]] = relationship(back_populates="asset")
+    action_requests: Mapped[list["ActionRequest"]] = relationship(back_populates="asset")
+    isolation_actions: Mapped[list["IsolationAction"]] = relationship(back_populates="asset")
+    recovery_jobs: Mapped[list["RecoveryJob"]] = relationship(back_populates="asset")
 
 
 class SecurityEvent(UUIDPrimaryKey, Base):
@@ -73,7 +76,6 @@ class SecurityEvent(UUIDPrimaryKey, Base):
             name="ck_security_event_severity",
         ),
         UniqueConstraint("source", "source_event_id", name="uq_security_event_source_id"),
-        Index("ix_security_events_occurred_at", "occurred_at"),
     )
 
     source: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -105,7 +107,6 @@ class ThreatIncident(UUIDPrimaryKey, TimestampMixin, Base):
             "'recovery_in_progress', 'recovered', 'resolved', 'false_positive', 'closed')",
             name="ck_threat_incident_lifecycle_status",
         ),
-        Index("ix_threat_incidents_detected_at", "detected_at"),
     )
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -138,7 +139,6 @@ class RiskAssessment(UUIDPrimaryKey, Base):
         CheckConstraint("score >= 0 AND score <= 100", name="ck_risk_assessment_score_range"),
         CheckConstraint("status IN ('completed', 'failed')", name="ck_risk_assessment_status"),
         CheckConstraint("risk_level IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')", name="ck_risk_assessment_level"),
-        Index("ix_risk_assessments_assessed_at", "assessed_at"),
     )
 
     incident_id: Mapped[str] = mapped_column(ForeignKey("threat_incidents.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -155,6 +155,7 @@ class RiskAssessment(UUIDPrimaryKey, Base):
 
     incident: Mapped[ThreatIncident] = relationship(back_populates="risk_assessments", foreign_keys=[incident_id])
     decisions: Mapped[list["Decision"]] = relationship(back_populates="risk_assessment")
+    asset: Mapped[Asset] = relationship(back_populates="risk_assessments")
 
 
 class Decision(UUIDPrimaryKey, Base):
@@ -181,6 +182,7 @@ class Decision(UUIDPrimaryKey, Base):
     incident: Mapped[ThreatIncident] = relationship(back_populates="decisions")
     risk_assessment: Mapped[RiskAssessment] = relationship(back_populates="decisions")
     action_requests: Mapped[list["ActionRequest"]] = relationship(back_populates="decision")
+    asset: Mapped[Asset] = relationship(back_populates="decisions")
 
 
 class ActionRequest(UUIDPrimaryKey, TimestampMixin, Base):
@@ -219,6 +221,9 @@ class ActionRequest(UUIDPrimaryKey, TimestampMixin, Base):
 
     decision: Mapped[Decision | None] = relationship(back_populates="action_requests")
     incident: Mapped[ThreatIncident | None] = relationship(back_populates="action_requests")
+    asset: Mapped[Asset | None] = relationship(back_populates="action_requests")
+    backup: Mapped["Backup | None"] = relationship(back_populates="action_requests")
+    verification: Mapped["IntegrityVerification | None"] = relationship(back_populates="action_requests")
     isolation_action: Mapped["IsolationAction | None"] = relationship(back_populates="action_request", uselist=False)
     recovery_job: Mapped["RecoveryJob | None"] = relationship(back_populates="action_request", uselist=False)
 
@@ -253,6 +258,7 @@ class Backup(UUIDPrimaryKey, TimestampMixin, Base):
     asset: Mapped[Asset] = relationship(back_populates="backups")
     verifications: Mapped[list["IntegrityVerification"]] = relationship(back_populates="backup")
     recovery_jobs: Mapped[list["RecoveryJob"]] = relationship(back_populates="backup")
+    action_requests: Mapped[list[ActionRequest]] = relationship(back_populates="backup")
 
 
 class IntegrityVerification(UUIDPrimaryKey, Base):
@@ -279,6 +285,7 @@ class IntegrityVerification(UUIDPrimaryKey, Base):
 
     backup: Mapped[Backup] = relationship(back_populates="verifications")
     recovery_jobs: Mapped[list["RecoveryJob"]] = relationship(back_populates="verification")
+    action_requests: Mapped[list[ActionRequest]] = relationship(back_populates="verification")
 
 
 class IsolationAction(UUIDPrimaryKey, Base):
@@ -307,6 +314,8 @@ class IsolationAction(UUIDPrimaryKey, Base):
     correlation_id: Mapped[str] = mapped_column(String(36), default=new_id, nullable=False, index=True)
 
     action_request: Mapped[ActionRequest] = relationship(back_populates="isolation_action")
+    asset: Mapped[Asset] = relationship(back_populates="isolation_actions")
+    incident: Mapped[ThreatIncident | None] = relationship()
 
 
 class RecoveryJob(UUIDPrimaryKey, Base):
@@ -352,11 +361,11 @@ class RecoveryJob(UUIDPrimaryKey, Base):
     incident: Mapped[ThreatIncident] = relationship(back_populates="recovery_jobs")
     backup: Mapped[Backup] = relationship(back_populates="recovery_jobs")
     verification: Mapped[IntegrityVerification] = relationship(back_populates="recovery_jobs")
+    asset: Mapped[Asset] = relationship(back_populates="recovery_jobs")
 
 
 class AuditEvent(UUIDPrimaryKey, Base):
     __tablename__ = "audit_events"
-    __table_args__ = (Index("ix_audit_events_occurred_at", "occurred_at"),)
 
     actor_type: Mapped[str] = mapped_column(String(50), nullable=False)
     actor_id: Mapped[str | None] = mapped_column(String(255))
@@ -405,7 +414,7 @@ class SystemSettings(UUIDPrimaryKey, TimestampMixin, Base):
     notification_policy: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
 
-def _reject_audit_mutation(mapper, connection, target) -> None:
+def _reject_audit_mutation(_mapper, _connection, _target) -> None:
     raise ValueError("Audit events are append-only and cannot be updated or deleted")
 
 

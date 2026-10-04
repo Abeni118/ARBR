@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.common import get_or_404, paginate
+from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import IncidentLifecycleStatus
 from app.models import ThreatIncident
@@ -29,9 +29,9 @@ def list_threats(
     if status:
         query = query.filter(ThreatIncident.lifecycle_status == status.value)
     if from_:
-        query = query.filter(ThreatIncident.detected_at >= from_)
+        query = query.filter(ThreatIncident.detected_at >= as_utc(from_))
     if to:
-        query = query.filter(ThreatIncident.detected_at <= to)
+        query = query.filter(ThreatIncident.detected_at <= as_utc(to))
     return paginate(query.order_by(ThreatIncident.detected_at.desc()), page, page_size)
 
 

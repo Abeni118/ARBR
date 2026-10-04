@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.common import get_or_404, paginate
+from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import RecoveryJobStatus
 from app.models import RecoveryJob
@@ -32,9 +32,9 @@ def list_recovery_jobs(
     if status:
         query = query.filter(RecoveryJob.job_status == status.value)
     if from_:
-        query = query.filter(RecoveryJob.started_at >= from_)
+        query = query.filter(RecoveryJob.started_at >= as_utc(from_))
     if to:
-        query = query.filter(RecoveryJob.started_at <= to)
+        query = query.filter(RecoveryJob.started_at <= as_utc(to))
     return paginate(query.order_by(RecoveryJob.started_at.desc()), page, page_size)
 
 
