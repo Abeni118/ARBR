@@ -1,7 +1,15 @@
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Query, Session
 
 from app.schemas import Page
+
+
+def as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def paginate(query: Query, page: int, page_size: int) -> Page:

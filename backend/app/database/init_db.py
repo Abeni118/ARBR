@@ -2,19 +2,11 @@ from sqlalchemy import select
 
 from app.database.session import DEFAULT_DATABASE_PATH, SessionLocal, engine
 from app.models import Base, SystemSettings
+from app.risk import DEFAULT_RISK_THRESHOLDS
 
 
 DEFAULT_SETTINGS = {
-    "risk_thresholds": {
-        "low_min": 0,
-        "low_max": 29,
-        "medium_min": 30,
-        "medium_max": 59,
-        "high_min": 60,
-        "high_max": 79,
-        "critical_min": 80,
-        "critical_max": 100,
-    },
+    "risk_thresholds": DEFAULT_RISK_THRESHOLDS,
     "isolation_policy": {},
     "backup_policy": {},
     "recovery_policy": {"automatic_recovery": False},

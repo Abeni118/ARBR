@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.common import get_or_404, paginate
+from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import ActionExecutionStatus, ActionType, ApprovalStatus
 from app.models import ActionRequest
@@ -38,9 +38,9 @@ def list_action_requests(
     if execution_status:
         query = query.filter(ActionRequest.execution_status == execution_status.value)
     if from_:
-        query = query.filter(ActionRequest.created_at >= from_)
+        query = query.filter(ActionRequest.created_at >= as_utc(from_))
     if to:
-        query = query.filter(ActionRequest.created_at <= to)
+        query = query.filter(ActionRequest.created_at <= as_utc(to))
     return paginate(query.order_by(ActionRequest.created_at.desc()), page, page_size)
 
 

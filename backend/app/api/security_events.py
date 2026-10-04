@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.common import get_or_404, paginate
+from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import EventProcessingStatus, EventSeverity
 from app.models import SecurityEvent
@@ -35,9 +35,9 @@ def list_security_events(
     if severity:
         query = query.filter(SecurityEvent.event_severity == severity.value)
     if from_:
-        query = query.filter(SecurityEvent.occurred_at >= from_)
+        query = query.filter(SecurityEvent.occurred_at >= as_utc(from_))
     if to:
-        query = query.filter(SecurityEvent.occurred_at <= to)
+        query = query.filter(SecurityEvent.occurred_at <= as_utc(to))
     return paginate(query.order_by(SecurityEvent.occurred_at.desc()), page, page_size)
 
 

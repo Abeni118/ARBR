@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.common import get_or_404, paginate
+from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import BackupLifecycleStatus, BackupProtectionStatus
 from app.models import Backup
@@ -32,9 +32,9 @@ def list_backups(
     if protection_status:
         query = query.filter(Backup.protection_status == protection_status.value)
     if from_:
-        query = query.filter(Backup.backup_created_at >= from_)
+        query = query.filter(Backup.backup_created_at >= as_utc(from_))
     if to:
-        query = query.filter(Backup.backup_created_at <= to)
+        query = query.filter(Backup.backup_created_at <= as_utc(to))
     return paginate(query.order_by(Backup.backup_created_at.desc()), page, page_size)
 
 

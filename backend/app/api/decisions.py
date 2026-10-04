@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.common import get_or_404, paginate
+from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import DecisionStatus
 from app.models import Decision
@@ -35,9 +35,9 @@ def list_decisions(
     if status:
         query = query.filter(Decision.decision_status == status.value)
     if from_:
-        query = query.filter(Decision.created_at >= from_)
+        query = query.filter(Decision.created_at >= as_utc(from_))
     if to:
-        query = query.filter(Decision.created_at <= to)
+        query = query.filter(Decision.created_at <= as_utc(to))
     return paginate(query.order_by(Decision.created_at.desc()), page, page_size)
 
 

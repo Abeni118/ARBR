@@ -34,6 +34,7 @@ uvicorn app.main:app --reload
 ```
 
 The app also initializes missing tables and the default singleton settings row when it starts.
+This phase uses SQLAlchemy `create_all` and does not include Alembic migrations; `create_all` creates missing tables but does not alter an existing table when a model changes. Use a fresh local database for this phase's schema, and decide on migrations before making schema-evolution changes.
 
 ## Database configuration
 

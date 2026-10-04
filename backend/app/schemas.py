@@ -32,10 +32,61 @@ def _as_utc(value: datetime) -> datetime:
 UTCDateTime = Annotated[datetime, AfterValidator(_as_utc)]
 RiskScore = Annotated[int, Field(ge=0, le=100)]
 Confidence = Annotated[float, Field(ge=0, le=1)]
+_SECRET_KEY_MARKERS = (
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "credential",
+    "authorization",
+)
+
+
+def _reject_secret_fields(value: Any, path: str = "") -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized_key = str(key).lower().replace("-", "_")
+            if any(marker in normalized_key for marker in _SECRET_KEY_MARKERS):
+                raise ValueError(f"Secret field '{path}{key}' is not allowed in settings or safe metadata")
+            _reject_secret_fields(child, f"{path}{key}.")
+    elif isinstance(value, list):
+        for child in value:
+            _reject_secret_fields(child, path)
 
 
 class APIModel(BaseModel):
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+
+class RiskThresholds(APIModel):
+    low_min: int = Field(ge=0, le=100)
+    low_max: int = Field(ge=0, le=100)
+    medium_min: int = Field(ge=0, le=100)
+    medium_max: int = Field(ge=0, le=100)
+    high_min: int = Field(ge=0, le=100)
+    high_max: int = Field(ge=0, le=100)
+    critical_min: int = Field(ge=0, le=100)
+    critical_max: int = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_contiguous_bands(self):
+        if self.low_min != 0 or self.critical_max != 100:
+            raise ValueError("Risk thresholds must cover the full 0–100 score range")
+        if not (
+            self.low_min <= self.low_max < self.medium_min <= self.medium_max
+            < self.high_min <= self.high_max < self.critical_min <= self.critical_max
+        ):
+            raise ValueError("Risk threshold bands must be ordered and non-overlapping")
+        if not (
+            self.low_max + 1 == self.medium_min
+            and self.medium_max + 1 == self.high_min
+            and self.high_max + 1 == self.critical_min
+        ):
+            raise ValueError("Risk threshold bands must be contiguous with no gaps")
+        return self
 
 
 T = TypeVar("T")
@@ -370,6 +421,11 @@ class AuditEventCreate(APIModel):
     correlation_id: UUID | None = None
     occurred_at: UTCDateTime | None = None
 
+    @model_validator(mode="after")
+    def validate_safe_metadata(self):
+        _reject_secret_fields(self.safe_metadata)
+        return self
+
 
 class AuditEventRead(APIModel):
     id: UUID
@@ -396,20 +452,43 @@ class AuditEventRead(APIModel):
 
 
 class SystemSettingsUpdate(APIModel):
-    risk_thresholds: dict[str, int] | None = None
+    risk_thresholds: RiskThresholds | None = None
     isolation_policy: dict[str, Any] | None = None
     backup_policy: dict[str, Any] | None = None
     recovery_policy: dict[str, Any] | None = None
     notification_policy: dict[str, Any] | None = None
 
+    @model_validator(mode="after")
+    def validate_no_secret_fields(self):
+        for policy in (
+            self.isolation_policy,
+            self.backup_policy,
+            self.recovery_policy,
+            self.notification_policy,
+        ):
+            if policy is not None:
+                _reject_secret_fields(policy)
+        return self
+
 
 class SystemSettingsRead(APIModel):
     id: UUID
     version: int
-    risk_thresholds: dict[str, int]
+    risk_thresholds: RiskThresholds
     isolation_policy: dict[str, Any]
     backup_policy: dict[str, Any]
     recovery_policy: dict[str, Any]
     notification_policy: dict[str, Any]
     created_at: UTCDateTime
     updated_at: UTCDateTime
+
+    @model_validator(mode="after")
+    def validate_no_secret_fields(self):
+        for policy in (
+            self.isolation_policy,
+            self.backup_policy,
+            self.recovery_policy,
+            self.notification_policy,
+        ):
+            _reject_secret_fields(policy)
+        return self
