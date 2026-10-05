@@ -10,7 +10,9 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Table,
     UniqueConstraint,
+    Column,
     event,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -26,6 +28,14 @@ def utc_now() -> datetime:
 
 class Base(DeclarativeBase):
     pass
+
+
+threat_incident_assets = Table(
+    "threat_incident_assets",
+    Base.metadata,
+    Column("incident_id", String(36), ForeignKey("threat_incidents.id", ondelete="CASCADE"), primary_key=True),
+    Column("asset_id", String(36), ForeignKey("assets.id", ondelete="RESTRICT"), primary_key=True),
+)
 
 
 class UUIDPrimaryKey:
@@ -56,6 +66,9 @@ class Asset(UUIDPrimaryKey, TimestampMixin, Base):
 
     security_events: Mapped[list["SecurityEvent"]] = relationship(back_populates="asset")
     threat_incidents: Mapped[list["ThreatIncident"]] = relationship(back_populates="asset")
+    affected_incidents: Mapped[list["ThreatIncident"]] = relationship(
+        secondary=threat_incident_assets, back_populates="affected_assets"
+    )
     backups: Mapped[list["Backup"]] = relationship(back_populates="asset")
     risk_assessments: Mapped[list["RiskAssessment"]] = relationship(back_populates="asset")
     decisions: Mapped[list["Decision"]] = relationship(back_populates="asset")
@@ -124,6 +137,9 @@ class ThreatIncident(UUIDPrimaryKey, TimestampMixin, Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     asset: Mapped[Asset] = relationship(back_populates="threat_incidents", foreign_keys=[asset_id])
+    affected_assets: Mapped[list[Asset]] = relationship(
+        secondary=threat_incident_assets, back_populates="affected_incidents"
+    )
     security_events: Mapped[list[SecurityEvent]] = relationship(back_populates="incident", foreign_keys="SecurityEvent.incident_id")
     risk_assessments: Mapped[list["RiskAssessment"]] = relationship(
         back_populates="incident", foreign_keys="RiskAssessment.incident_id"
@@ -131,6 +147,10 @@ class ThreatIncident(UUIDPrimaryKey, TimestampMixin, Base):
     decisions: Mapped[list["Decision"]] = relationship(back_populates="incident")
     action_requests: Mapped[list["ActionRequest"]] = relationship(back_populates="incident")
     recovery_jobs: Mapped[list["RecoveryJob"]] = relationship(back_populates="incident")
+
+    @property
+    def affected_asset_ids(self) -> list[str]:
+        return sorted({self.asset_id, *(asset.id for asset in self.affected_assets)})
 
 
 class RiskAssessment(UUIDPrimaryKey, Base):

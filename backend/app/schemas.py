@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Generic, TypeVar
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from .enums import (
     ActionExecutionStatus,
@@ -50,7 +50,7 @@ def _reject_secret_fields(value: Any, path: str = "") -> None:
         for key, child in value.items():
             normalized_key = str(key).lower().replace("-", "_")
             if any(marker in normalized_key for marker in _SECRET_KEY_MARKERS):
-                raise ValueError(f"Secret field '{path}{key}' is not allowed in settings or safe metadata")
+                raise ValueError(f"Secret-like field '{path}{key}' is not allowed")
             _reject_secret_fields(child, f"{path}{key}.")
     elif isinstance(value, list):
         for child in value:
@@ -129,10 +129,16 @@ class AssetRead(APIModel):
     updated_at: UTCDateTime
 
 
+class AssetExternalReference(APIModel):
+    external_source: str = Field(min_length=1, max_length=100)
+    external_id: str = Field(min_length=1, max_length=255)
+
+
 class SecurityEventCreate(APIModel):
     source: str = Field(min_length=1, max_length=100)
     source_event_id: str = Field(min_length=1, max_length=255)
     asset_id: UUID | None = None
+    asset_external_ref: AssetExternalReference | None = None
     incident_id: UUID | None = None
     occurred_at: UTCDateTime
     event_type: str = Field(min_length=1, max_length=100)
@@ -142,6 +148,14 @@ class SecurityEventCreate(APIModel):
     evidence: dict[str, Any] = Field(default_factory=dict)
     source_component: str | None = Field(default=None, max_length=100)
     correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_asset_reference_and_safe_content(self):
+        if (self.asset_id is None) == (self.asset_external_ref is None):
+            raise ValueError("Provide exactly one of asset_id or asset_external_ref")
+        _reject_secret_fields(self.indicators)
+        _reject_secret_fields(self.evidence)
+        return self
 
 
 class SecurityEventRead(APIModel):
@@ -162,10 +176,18 @@ class SecurityEventRead(APIModel):
     correlation_id: UUID
 
 
+class SecurityEventIngestResponse(APIModel):
+    event: SecurityEventRead
+    duplicate: bool
+    correlation_id: UUID
+
+
 class ThreatIncidentCreate(APIModel):
     title: str = Field(min_length=1, max_length=255)
     threat_type: str = Field(min_length=1, max_length=100)
-    asset_id: UUID
+    asset_id: UUID | None = None
+    asset_ids: list[UUID] = Field(default_factory=list)
+    asset_external_refs: list[AssetExternalReference] = Field(default_factory=list)
     description: str | None = None
     indicators: list[dict[str, Any]] = Field(default_factory=list)
     detection_source: str | None = Field(default=None, max_length=100)
@@ -173,12 +195,20 @@ class ThreatIncidentCreate(APIModel):
     detected_at: UTCDateTime
     correlation_id: UUID | None = None
 
+    @model_validator(mode="after")
+    def validate_assets_and_safe_content(self):
+        if not (self.asset_id or self.asset_ids or self.asset_external_refs):
+            raise ValueError("Provide at least one asset reference")
+        _reject_secret_fields(self.indicators)
+        return self
+
 
 class ThreatIncidentRead(APIModel):
     id: UUID
     title: str
     threat_type: str
     asset_id: UUID
+    affected_asset_ids: list[UUID]
     description: str | None
     indicators: list[dict[str, Any]]
     detection_source: str | None
@@ -201,6 +231,11 @@ class RiskAssessmentCreate(APIModel):
     policy_version: str | None = Field(default=None, max_length=100)
     assessed_at: UTCDateTime | None = None
     correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_safe_factors(self):
+        _reject_secret_fields(self.factors)
+        return self
 
 
 class RiskAssessmentRead(APIModel):
@@ -226,7 +261,11 @@ class DecisionCreate(APIModel):
     rationale: str = Field(min_length=1)
     approval_required: bool = True
     policy_version: str | None = Field(default=None, max_length=100)
-    engine_version: str | None = Field(default=None, max_length=100)
+    decision_engine_version: str | None = Field(
+        default=None,
+        max_length=100,
+        validation_alias=AliasChoices("decision_engine_version", "engine_version"),
+    )
     correlation_id: UUID | None = None
 
 
@@ -240,7 +279,7 @@ class DecisionRead(APIModel):
     approval_required: bool
     decision_status: DecisionStatus
     policy_version: str | None
-    engine_version: str | None
+    decision_engine_version: str | None = Field(validation_alias="engine_version")
     created_at: UTCDateTime
     correlation_id: UUID
 
