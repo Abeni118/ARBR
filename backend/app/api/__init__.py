@@ -6,6 +6,7 @@ from app.api import (
     audit_logs,
     backups,
     decisions,
+    dashboard,
     health,
     integrity_verifications,
     isolation,
@@ -19,6 +20,7 @@ from app.api import (
 api_router = APIRouter()
 for route_module in (
     health,
+    dashboard,
     assets,
     security_events,
     threats,
@@ -33,3 +35,6 @@ for route_module in (
     settings,
 ):
     api_router.include_router(route_module.router)
+
+for route_module in (security_events, threats, risk_assessments, decisions):
+    api_router.include_router(route_module.internal_router)
