@@ -19,6 +19,16 @@ class RiskAssessment:
     threat_type: str
     triggered_rules: tuple[str, ...]
 
+    def to_dict(self) -> dict:
+        return {
+            "event_id": self.event_id,
+            "host_id": self.host_id,
+            "risk_score": self.risk_score,
+            "risk_level": self.risk_level,
+            "threat_type": self.threat_type,
+            "triggered_rules": list(self.triggered_rules),
+        }
+
 
 class RiskEngine:
     def __init__(self, rules=RISK_RULES):

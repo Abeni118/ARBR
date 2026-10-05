@@ -104,3 +104,22 @@ def test_event_context_is_preserved():
 
     assert assessment.event_id == "event-006"
     assert assessment.host_id == "host-05"
+
+
+def test_risk_assessment_can_be_serialized():
+    event = RiskEvent(
+        event_id="event-004",
+        host_id="host-04",
+        indicators={"mass_file_encryption": True},
+    )
+
+    assessment = RiskEngine().assess(event)
+
+    data = assessment.to_dict()
+
+    assert data["event_id"] == "event-004"
+    assert data["host_id"] == "host-04"
+    assert data["risk_score"] == 40.0
+    assert data["risk_level"] == "MEDIUM"
+    assert data["threat_type"] == "ransomware_behavior"
+    assert data["triggered_rules"] == ["mass_file_encryption"]
