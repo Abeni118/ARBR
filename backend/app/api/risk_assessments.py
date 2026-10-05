@@ -1,16 +1,79 @@
-from datetime import datetime
-from uuid import UUID
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import RiskAssessmentStatus, RiskLevel
-from app.models import RiskAssessment
-from app.schemas import Page, RiskAssessmentRead
+from app.models import Asset, RiskAssessment, ThreatIncident
+from app.risk import risk_level_for_score
+from app.schemas import Page, RiskAssessmentCreate, RiskAssessmentRead
+from app.services.audit import record_phase2_audit
 
 router = APIRouter(prefix="/api/risk-assessments", tags=["risk-assessments"])
+internal_router = APIRouter(prefix="/api/internal/risk-assessments", tags=["internal-risk-assessments"])
+
+
+def _reject_assessment(db: Session, payload: RiskAssessmentCreate, detail: str, code: int):
+    record_phase2_audit(
+        db,
+        action="risk_assessment.create",
+        result_status="rejected",
+        resource_type="risk_assessment",
+        correlation_id=payload.correlation_id or uuid4(),
+        reason=detail,
+    )
+    db.commit()
+    raise HTTPException(status_code=code, detail=detail)
+
+
+@internal_router.post("", response_model=RiskAssessmentRead, status_code=status.HTTP_201_CREATED)
+def create_risk_assessment(payload: RiskAssessmentCreate, db: Session = Depends(get_db)):
+    incident = db.get(ThreatIncident, str(payload.incident_id))
+    if incident is None:
+        _reject_assessment(db, payload, "Threat incident not found", status.HTTP_404_NOT_FOUND)
+    asset = db.get(Asset, str(payload.asset_id))
+    if asset is None:
+        _reject_assessment(db, payload, "Asset not found", status.HTTP_404_NOT_FOUND)
+    related_asset_ids = {incident.asset_id, *(item.id for item in incident.affected_assets)}
+    if asset.id not in related_asset_ids:
+        _reject_assessment(db, payload, "Asset is not affected by the referenced incident", status.HTTP_409_CONFLICT)
+
+    correlation_id = payload.correlation_id or UUID(incident.correlation_id)
+    assessment = RiskAssessment(
+        incident_id=incident.id,
+        asset_id=asset.id,
+        score=payload.score,
+        risk_level=risk_level_for_score(payload.score).value,
+        factors=payload.factors,
+        confidence=payload.confidence,
+        model_version=payload.model_version,
+        policy_version=payload.policy_version,
+        assessed_at=as_utc(payload.assessed_at) if payload.assessed_at else datetime.now(timezone.utc),
+        correlation_id=str(correlation_id),
+    )
+    db.add(assessment)
+    db.flush()
+    incident.current_risk_assessment_id = assessment.id
+    record_phase2_audit(
+        db,
+        action="risk_assessment.create",
+        result_status="success",
+        resource_type="risk_assessment",
+        resource_id=assessment.id,
+        incident_id=incident.id,
+        asset_id=asset.id,
+        assessment_id=assessment.id,
+        correlation_id=correlation_id,
+        actor_id=payload.model_version,
+        source_component="risk_assessment_service",
+        safe_metadata={"score": assessment.score, "risk_level": assessment.risk_level},
+    )
+    db.commit()
+    db.refresh(assessment)
+    return assessment
 
 
 @router.get("", response_model=Page[RiskAssessmentRead])

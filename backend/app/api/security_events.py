@@ -1,16 +1,132 @@
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import EventProcessingStatus, EventSeverity
 from app.models import SecurityEvent
-from app.schemas import Page, SecurityEventRead
+from app.schemas import Page, SecurityEventCreate, SecurityEventIngestResponse, SecurityEventRead
+from app.services.asset_resolution import resolve_asset
+from app.services.audit import record_phase2_audit
 
 router = APIRouter(prefix="/api/security-events", tags=["security-events"])
+internal_router = APIRouter(prefix="/api/internal/security-events", tags=["internal-security-events"])
+
+
+@internal_router.post("", response_model=SecurityEventIngestResponse, status_code=status.HTTP_201_CREATED)
+def ingest_security_event(payload: SecurityEventCreate, response: Response, db: Session = Depends(get_db)):
+    correlation_id = payload.correlation_id or uuid4()
+    existing = (
+        db.query(SecurityEvent)
+        .filter(SecurityEvent.source == payload.source, SecurityEvent.source_event_id == payload.source_event_id)
+        .first()
+    )
+    if existing is not None:
+        record_phase2_audit(
+            db,
+            action="security_event.duplicate",
+            result_status="duplicate",
+            resource_type="security_event",
+            resource_id=existing.id,
+            event_id=existing.id,
+            asset_id=existing.asset_id,
+            correlation_id=existing.correlation_id,
+            actor_id=payload.source,
+            source_component=payload.source_component or payload.source,
+            safe_metadata={"source_event_id": payload.source_event_id},
+        )
+        db.commit()
+        response.status_code = status.HTTP_200_OK
+        return SecurityEventIngestResponse(event=existing, duplicate=True, correlation_id=existing.correlation_id)
+
+    try:
+        asset = resolve_asset(db, payload.asset_id, payload.asset_external_ref)
+        if payload.incident_id is not None:
+            from app.models import ThreatIncident
+
+            incident = db.get(ThreatIncident, str(payload.incident_id))
+            if incident is None:
+                raise HTTPException(status_code=404, detail="Threat incident not found")
+            affected_asset_ids = {incident.asset_id, *(item.id for item in incident.affected_assets)}
+            if asset.id not in affected_asset_ids:
+                raise HTTPException(status_code=409, detail="Asset is not affected by the referenced incident")
+    except HTTPException as exc:
+        record_phase2_audit(
+            db,
+            action="security_event.received",
+            result_status="rejected",
+            resource_type="security_event",
+            correlation_id=correlation_id,
+            actor_id=payload.source,
+            source_component=payload.source_component or payload.source,
+            reason=exc.detail,
+        )
+        db.commit()
+        raise
+
+    event = SecurityEvent(
+        source=payload.source,
+        source_event_id=payload.source_event_id,
+        asset_id=asset.id,
+        incident_id=str(payload.incident_id) if payload.incident_id else None,
+        occurred_at=as_utc(payload.occurred_at),
+        event_type=payload.event_type,
+        event_severity=payload.event_severity,
+        summary=payload.summary,
+        indicators=payload.indicators,
+        evidence=payload.evidence,
+        source_component=payload.source_component or payload.source,
+        correlation_id=str(correlation_id),
+    )
+    db.add(event)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = (
+            db.query(SecurityEvent)
+            .filter(SecurityEvent.source == payload.source, SecurityEvent.source_event_id == payload.source_event_id)
+            .first()
+        )
+        if existing is None:
+            raise HTTPException(status_code=409, detail="Security event conflicts with an existing record") from exc
+        record_phase2_audit(
+            db,
+            action="security_event.duplicate",
+            result_status="duplicate",
+            resource_type="security_event",
+            resource_id=existing.id,
+            event_id=existing.id,
+            asset_id=existing.asset_id,
+            correlation_id=existing.correlation_id,
+            actor_id=payload.source,
+            source_component=payload.source_component or payload.source,
+            safe_metadata={"source_event_id": payload.source_event_id},
+        )
+        db.commit()
+        response.status_code = status.HTTP_200_OK
+        return SecurityEventIngestResponse(event=existing, duplicate=True, correlation_id=existing.correlation_id)
+
+    record_phase2_audit(
+        db,
+        action="security_event.received",
+        result_status="success",
+        resource_type="security_event",
+        resource_id=event.id,
+        event_id=event.id,
+        asset_id=asset.id,
+        correlation_id=correlation_id,
+        actor_id=payload.source,
+        source_component=payload.source_component or payload.source,
+        safe_metadata={"source_event_id": payload.source_event_id},
+    )
+    db.commit()
+    db.refresh(event)
+    return SecurityEventIngestResponse(event=event, duplicate=False, correlation_id=correlation_id)
 
 
 @router.get("", response_model=Page[SecurityEventRead])
@@ -18,6 +134,10 @@ def list_security_events(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     asset_id: UUID | None = None,
+    source: str | None = None,
+    event_type: str | None = None,
+    event_severity: EventSeverity | None = None,
+    processing_status: EventProcessingStatus | None = None,
     incident_id: UUID | None = None,
     status: EventProcessingStatus | None = None,
     severity: EventSeverity | None = None,
@@ -28,12 +148,18 @@ def list_security_events(
     query = db.query(SecurityEvent)
     if asset_id:
         query = query.filter(SecurityEvent.asset_id == str(asset_id))
+    if source:
+        query = query.filter(SecurityEvent.source == source)
+    if event_type:
+        query = query.filter(SecurityEvent.event_type == event_type)
+    selected_status = processing_status or status
+    if selected_status:
+        query = query.filter(SecurityEvent.processing_status == selected_status.value)
+    selected_severity = event_severity or severity
+    if selected_severity:
+        query = query.filter(SecurityEvent.event_severity == selected_severity.value)
     if incident_id:
         query = query.filter(SecurityEvent.incident_id == str(incident_id))
-    if status:
-        query = query.filter(SecurityEvent.processing_status == status.value)
-    if severity:
-        query = query.filter(SecurityEvent.event_severity == severity.value)
     if from_:
         query = query.filter(SecurityEvent.occurred_at >= as_utc(from_))
     if to:
