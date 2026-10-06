@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 from typing import Annotated, Any, Generic, TypeVar
 from uuid import UUID
 
@@ -43,6 +44,14 @@ _SECRET_KEY_MARKERS = (
     "credential",
     "authorization",
 )
+_SECRET_VALUE_PATTERNS = (
+    re.compile(
+        r"(?:password|passwd|token|api[_-]?key|private[_-]?key|authorization)\s*[:=]\s*\S+",
+        re.IGNORECASE,
+    ),
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]+=*", re.IGNORECASE),
+)
 
 
 def _reject_secret_fields(value: Any, path: str = "") -> None:
@@ -55,6 +64,22 @@ def _reject_secret_fields(value: Any, path: str = "") -> None:
     elif isinstance(value, list):
         for child in value:
             _reject_secret_fields(child, path)
+
+
+def _reject_sensitive_content(value: Any) -> None:
+    """Reject credential-like field names and recognizable embedded secrets."""
+    _reject_secret_fields(value)
+    if isinstance(value, dict):
+        children = value.values()
+    elif isinstance(value, list):
+        children = value
+    else:
+        children = (value,)
+    for child in children:
+        if isinstance(child, str) and any(pattern.search(child) for pattern in _SECRET_VALUE_PATTERNS):
+            raise ValueError("Credential-like content is not allowed")
+        if isinstance(child, (dict, list)):
+            _reject_sensitive_content(child)
 
 
 class APIModel(BaseModel):
@@ -153,8 +178,9 @@ class SecurityEventCreate(APIModel):
     def validate_asset_reference_and_safe_content(self):
         if (self.asset_id is None) == (self.asset_external_ref is None):
             raise ValueError("Provide exactly one of asset_id or asset_external_ref")
-        _reject_secret_fields(self.indicators)
-        _reject_secret_fields(self.evidence)
+        _reject_sensitive_content(self.summary)
+        _reject_sensitive_content(self.indicators)
+        _reject_sensitive_content(self.evidence)
         return self
 
 
@@ -182,6 +208,15 @@ class SecurityEventIngestResponse(APIModel):
     correlation_id: UUID
 
 
+class DashboardSummary(APIModel):
+    total_security_events: int
+    active_threats: int
+    high_risk_incidents: int
+    critical_risk_incidents: int
+    risk_distribution: dict[str, int]
+    recent_events: list[SecurityEventRead]
+
+
 class ThreatIncidentCreate(APIModel):
     title: str = Field(min_length=1, max_length=255)
     threat_type: str = Field(min_length=1, max_length=100)
@@ -199,7 +234,8 @@ class ThreatIncidentCreate(APIModel):
     def validate_assets_and_safe_content(self):
         if not (self.asset_id or self.asset_ids or self.asset_external_refs):
             raise ValueError("Provide at least one asset reference")
-        _reject_secret_fields(self.indicators)
+        _reject_sensitive_content(self.description)
+        _reject_sensitive_content(self.indicators)
         return self
 
 
@@ -234,7 +270,7 @@ class RiskAssessmentCreate(APIModel):
 
     @model_validator(mode="after")
     def validate_safe_factors(self):
-        _reject_secret_fields(self.factors)
+        _reject_sensitive_content(self.factors)
         return self
 
 
@@ -257,7 +293,10 @@ class DecisionCreate(APIModel):
     incident_id: UUID
     assessment_id: UUID
     asset_id: UUID
-    recommended_actions: list[ActionType] = Field(min_length=1)
+    recommended_actions: list[ActionType] = Field(
+        min_length=1,
+        description="Proposed actions only; creating a decision does not request, approve, or execute them.",
+    )
     rationale: str = Field(min_length=1)
     approval_required: bool = True
     policy_version: str | None = Field(default=None, max_length=100)
@@ -268,16 +307,23 @@ class DecisionCreate(APIModel):
     )
     correlation_id: UUID | None = None
 
+    @model_validator(mode="after")
+    def validate_rationale(self):
+        _reject_sensitive_content(self.rationale)
+        return self
+
 
 class DecisionRead(APIModel):
     id: UUID
     incident_id: UUID
     assessment_id: UUID
     asset_id: UUID
-    recommended_actions: list[ActionType]
+    recommended_actions: list[ActionType] = Field(
+        description="Recommendation only. It is distinct from action requests and their approval/execution status."
+    )
     rationale: str
     approval_required: bool
-    decision_status: DecisionStatus
+    decision_status: DecisionStatus = Field(description="Decision recommendation status; not an action execution status.")
     policy_version: str | None
     decision_engine_version: str | None = Field(validation_alias="engine_version")
     created_at: UTCDateTime
@@ -299,7 +345,7 @@ class ActionRequestCreate(APIModel):
 
 class ActionRequestRead(APIModel):
     id: UUID
-    action_type: ActionType
+    action_type: ActionType = Field(description="Action explicitly requested, distinct from a decision recommendation.")
     decision_id: UUID | None
     incident_id: UUID | None
     asset_id: UUID | None
@@ -308,10 +354,10 @@ class ActionRequestRead(APIModel):
     requested_by_type: str
     requested_by_id: str | None
     request_reason: str | None
-    approval_status: ApprovalStatus
+    approval_status: ApprovalStatus = Field(description="Approval lifecycle for this request; independent of recommendation status.")
     approved_by_id: str | None
     approved_at: UTCDateTime | None
-    execution_status: ActionExecutionStatus
+    execution_status: ActionExecutionStatus = Field(description="Execution lifecycle for this request; no execution is implied by a decision.")
     started_at: UTCDateTime | None
     completed_at: UTCDateTime | None
     component_result: dict[str, Any]
