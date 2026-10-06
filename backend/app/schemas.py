@@ -342,6 +342,15 @@ class ActionRequestCreate(APIModel):
     request_reason: str | None = None
     correlation_id: UUID | None = None
 
+    @model_validator(mode="after")
+    def validate_safe_reason(self):
+        _reject_sensitive_content(self.request_reason)
+        return self
+
+
+class ActionRequestApproval(APIModel):
+    approved_by_id: str = Field(min_length=1, max_length=255)
+
 
 class ActionRequestRead(APIModel):
     id: UUID
@@ -369,20 +378,29 @@ class ActionRequestRead(APIModel):
 
 class BackupCreate(APIModel):
     asset_id: UUID
-    source_component: str = Field(min_length=1, max_length=100)
+    created_by_component: str = Field(min_length=1, max_length=100)
     external_backup_id: str = Field(min_length=1, max_length=255)
+    created_at: UTCDateTime
     backup_type: str | None = Field(default=None, max_length=100)
     size_bytes: int | None = Field(default=None, ge=0)
     storage_reference: str | None = Field(default=None, max_length=1024)
     manifest_reference: str | None = Field(default=None, max_length=1024)
-    backup_created_at: UTCDateTime | None = None
+    protection_status: BackupProtectionStatus
+    lifecycle_status: BackupLifecycleStatus
+    encryption_status: str = Field(min_length=1, max_length=50)
     correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_safe_references(self):
+        _reject_sensitive_content(self.storage_reference)
+        _reject_sensitive_content(self.manifest_reference)
+        return self
 
 
 class BackupRead(APIModel):
-    id: UUID
+    backup_id: UUID = Field(validation_alias=AliasChoices("backup_id", "id"))
     asset_id: UUID
-    source_component: str
+    created_by_component: str = Field(validation_alias=AliasChoices("created_by_component", "source_component"))
     external_backup_id: str
     backup_type: str | None
     size_bytes: int | None
@@ -391,35 +409,106 @@ class BackupRead(APIModel):
     lifecycle_status: BackupLifecycleStatus
     protection_status: BackupProtectionStatus
     encryption_status: str
-    backup_created_at: UTCDateTime | None
+    created_at: UTCDateTime | None = Field(validation_alias=AliasChoices("backup_created_at", "created_at"))
     correlation_id: UUID
-    created_at: UTCDateTime
     updated_at: UTCDateTime
 
 
-class IntegrityVerificationCreate(APIModel):
+class BackupCandidateRead(BackupRead):
+    verified: bool
+    recovery_eligible: bool
+    eligibility_reasons: list[str]
+
+
+class RecoveryEligibilityRead(APIModel):
+    eligible: bool
     backup_id: UUID
-    algorithm: str | None = Field(default=None, max_length=50)
-    expected_digest: str | None = Field(default=None, max_length=512)
-    trusted_manifest_reference: str | None = Field(default=None, max_length=1024)
+    reasons: list[str]
+
+
+class IntegrityVerificationCreate(APIModel):
+    reason: str | None = None
+    requested_by: str | None = Field(default=None, max_length=255)
     correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_safe_request(self):
+        _reject_sensitive_content(self.reason)
+        _reject_sensitive_content(self.requested_by)
+        return self
 
 
 class IntegrityVerificationResult(APIModel):
     result_status: VerificationStatus
+    algorithm: str | None = Field(default=None, max_length=50)
+    expected_digest: str | None = Field(default=None, max_length=512)
+    trusted_manifest_reference: str | None = Field(default=None, max_length=1024)
     observed_digest: str | None = Field(default=None, max_length=512)
+    verification_evidence_reference: str | None = Field(default=None, max_length=1024)
     verifier_component: str = Field(min_length=1, max_length=100)
     verifier_version: str | None = Field(default=None, max_length=100)
+    started_at: UTCDateTime | None = None
     completed_at: UTCDateTime | None = None
     failure_reason: str | None = None
+    correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_component_result(self):
+        if self.result_status == VerificationStatus.QUEUED:
+            raise ValueError("Component results cannot set verification status to queued")
+        if self.result_status == VerificationStatus.PASSED:
+            if not (self.expected_digest or self.trusted_manifest_reference):
+                raise ValueError("A passed result requires an expected digest or trusted manifest reference")
+            if not (self.observed_digest or self.verification_evidence_reference):
+                raise ValueError("A passed result requires observed digest or verification evidence")
+        _reject_sensitive_content(self.trusted_manifest_reference)
+        _reject_sensitive_content(self.verification_evidence_reference)
+        _reject_sensitive_content(self.failure_reason)
+        return self
+
+
+class BackupProtectionResult(APIModel):
+    protection_status: BackupProtectionStatus
+    execution_status: ActionExecutionStatus
+    component_reference: str | None = Field(default=None, max_length=255)
+    completed_at: UTCDateTime | None = None
+    failure_reason: str | None = None
+    correlation_id: UUID | None = None
+    action_request_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_reported_outcome(self):
+        expected = {
+            ActionExecutionStatus.EXECUTING: BackupProtectionStatus.PENDING,
+            ActionExecutionStatus.SUCCEEDED: BackupProtectionStatus.PROTECTED,
+            ActionExecutionStatus.FAILED: BackupProtectionStatus.FAILED,
+        }
+        if self.execution_status not in expected:
+            raise ValueError("Protection result execution_status must be executing, succeeded, or failed")
+        if self.protection_status != expected[self.execution_status]:
+            raise ValueError("Protection and execution statuses must describe the same outcome")
+        if self.execution_status == ActionExecutionStatus.FAILED and not self.failure_reason:
+            raise ValueError("A failed protection report requires failure_reason")
+        _reject_sensitive_content(self.component_reference)
+        _reject_sensitive_content(self.failure_reason)
+        return self
+
+
+class BackupProtectionResultRead(APIModel):
+    backup: BackupRead
+    action_request_id: UUID | None
+    execution_status: ActionExecutionStatus
+    correlation_id: UUID
 
 
 class IntegrityVerificationRead(APIModel):
-    id: UUID
+    verification_id: UUID = Field(validation_alias=AliasChoices("verification_id", "id"))
     backup_id: UUID
+    asset_id: UUID
     algorithm: str | None
     expected_digest: str | None
     observed_digest: str | None
+    verification_evidence_reference: str | None
     trusted_manifest_reference: str | None
     result_status: VerificationStatus
     verifier_component: str | None
@@ -427,6 +516,14 @@ class IntegrityVerificationRead(APIModel):
     started_at: UTCDateTime | None
     completed_at: UTCDateTime | None
     failure_reason: str | None
+    correlation_id: UUID
+
+
+class IntegrityVerificationRequested(APIModel):
+    verification_id: UUID
+    backup_id: UUID
+    result_status: VerificationStatus
+    requested_at: UTCDateTime
     correlation_id: UUID
 
 
