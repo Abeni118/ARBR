@@ -294,6 +294,7 @@ class IntegrityVerification(UUIDPrimaryKey, Base):
     algorithm: Mapped[str | None] = mapped_column(String(50))
     expected_digest: Mapped[str | None] = mapped_column(String(512))
     observed_digest: Mapped[str | None] = mapped_column(String(512))
+    verification_evidence_reference: Mapped[str | None] = mapped_column(String(1024))
     trusted_manifest_reference: Mapped[str | None] = mapped_column(String(1024))
     result_status: Mapped[str] = mapped_column(String(20), default="queued", nullable=False)
     verifier_component: Mapped[str | None] = mapped_column(String(100))
@@ -306,6 +307,11 @@ class IntegrityVerification(UUIDPrimaryKey, Base):
     backup: Mapped[Backup] = relationship(back_populates="verifications")
     recovery_jobs: Mapped[list["RecoveryJob"]] = relationship(back_populates="verification")
     action_requests: Mapped[list[ActionRequest]] = relationship(back_populates="verification")
+
+    @property
+    def asset_id(self) -> str:
+        """Expose the owning asset through this verification's exact backup."""
+        return self.backup.asset_id
 
 
 class IsolationAction(UUIDPrimaryKey, Base):
