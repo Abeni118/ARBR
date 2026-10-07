@@ -216,6 +216,10 @@ class ActionRequest(UUIDPrimaryKey, TimestampMixin, Base):
             "execution_status IN ('not_started', 'queued', 'executing', 'succeeded', 'failed', 'cancelled')",
             name="ck_action_request_execution_status",
         ),
+        CheckConstraint(
+            "isolation_mode IS NULL OR isolation_mode IN ('network', 'host', 'full')",
+            name="ck_action_request_isolation_mode",
+        ),
     )
 
     action_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -226,6 +230,7 @@ class ActionRequest(UUIDPrimaryKey, TimestampMixin, Base):
     verification_id: Mapped[str | None] = mapped_column(
         ForeignKey("integrity_verifications.id", ondelete="SET NULL"), index=True
     )
+    isolation_mode: Mapped[str | None] = mapped_column(String(20))
     requested_by_type: Mapped[str] = mapped_column(String(50), nullable=False)
     requested_by_id: Mapped[str | None] = mapped_column(String(255))
     request_reason: Mapped[str | None] = mapped_column(Text)
@@ -280,6 +285,18 @@ class Backup(UUIDPrimaryKey, TimestampMixin, Base):
     recovery_jobs: Mapped[list["RecoveryJob"]] = relationship(back_populates="backup")
     action_requests: Mapped[list[ActionRequest]] = relationship(back_populates="backup")
 
+    @property
+    def backup_id(self) -> str:
+        return self.id
+
+    @property
+    def created_by_component(self) -> str:
+        return self.source_component
+
+    @created_by_component.setter
+    def created_by_component(self, value: str) -> None:
+        self.source_component = value
+
 
 class IntegrityVerification(UUIDPrimaryKey, Base):
     __tablename__ = "integrity_verifications"
@@ -291,6 +308,7 @@ class IntegrityVerification(UUIDPrimaryKey, Base):
     )
 
     backup_id: Mapped[str] = mapped_column(ForeignKey("backups.id", ondelete="RESTRICT"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     algorithm: Mapped[str | None] = mapped_column(String(50))
     expected_digest: Mapped[str | None] = mapped_column(String(512))
     observed_digest: Mapped[str | None] = mapped_column(String(512))
@@ -313,6 +331,10 @@ class IntegrityVerification(UUIDPrimaryKey, Base):
         """Expose the owning asset through this verification's exact backup."""
         return self.backup.asset_id
 
+    @property
+    def verification_id(self) -> str:
+        return self.id
+
 
 class IsolationAction(UUIDPrimaryKey, Base):
     __tablename__ = "isolation_actions"
@@ -322,18 +344,31 @@ class IsolationAction(UUIDPrimaryKey, Base):
             "'isolated', 'failed', 'release_requested', 'released', 'cancelled')",
             name="ck_isolation_action_status",
         ),
+        CheckConstraint(
+            "network_state IS NULL OR network_state IN ('connected', 'isolating', 'isolated', 'releasing', 'unknown')",
+            name="ck_isolation_action_network_state",
+        ),
+        CheckConstraint(
+            "isolation_mode IS NULL OR isolation_mode IN ('network', 'host', 'full')",
+            name="ck_isolation_action_mode",
+        ),
     )
 
     action_request_id: Mapped[str] = mapped_column(
         ForeignKey("action_requests.id", ondelete="RESTRICT"), nullable=False, unique=True
     )
+    parent_isolation_action_id: Mapped[str | None] = mapped_column(
+        ForeignKey("isolation_actions.id", ondelete="RESTRICT"), index=True
+    )
     asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True)
     incident_id: Mapped[str | None] = mapped_column(ForeignKey("threat_incidents.id", ondelete="SET NULL"), index=True)
+    decision_id: Mapped[str | None] = mapped_column(ForeignKey("decisions.id", ondelete="SET NULL"), index=True)
     execution_status: Mapped[str] = mapped_column(String(30), default="requested", nullable=False)
-    isolation_mode: Mapped[str | None] = mapped_column(String(100))
+    isolation_mode: Mapped[str | None] = mapped_column(String(20))
     network_state: Mapped[str | None] = mapped_column(String(100))
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     component_reference: Mapped[str | None] = mapped_column(String(255))
     failure_reason: Mapped[str | None] = mapped_column(Text)
@@ -342,6 +377,16 @@ class IsolationAction(UUIDPrimaryKey, Base):
     action_request: Mapped[ActionRequest] = relationship(back_populates="isolation_action")
     asset: Mapped[Asset] = relationship(back_populates="isolation_actions")
     incident: Mapped[ThreatIncident | None] = relationship()
+    decision: Mapped[Decision | None] = relationship()
+    parent_isolation_action: Mapped["IsolationAction | None"] = relationship(remote_side="IsolationAction.id")
+
+    @property
+    def isolation_action_id(self) -> str:
+        return self.id
+
+    @property
+    def operation(self) -> str:
+        return self.action_request.action_type
 
 
 class RecoveryJob(UUIDPrimaryKey, Base):
@@ -412,6 +457,9 @@ class AuditEvent(UUIDPrimaryKey, Base):
     backup_id: Mapped[str | None] = mapped_column(ForeignKey("backups.id", ondelete="SET NULL"), index=True)
     verification_id: Mapped[str | None] = mapped_column(
         ForeignKey("integrity_verifications.id", ondelete="SET NULL"), index=True
+    )
+    isolation_action_id: Mapped[str | None] = mapped_column(
+        ForeignKey("isolation_actions.id", ondelete="SET NULL"), index=True
     )
     recovery_job_id: Mapped[str | None] = mapped_column(
         ForeignKey("recovery_jobs.id", ondelete="SET NULL"), index=True

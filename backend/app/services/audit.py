@@ -16,6 +16,7 @@ UUID_FIELDS = (
     "action_request_id",
     "backup_id",
     "verification_id",
+    "isolation_action_id",
     "recovery_job_id",
     "correlation_id",
 )
@@ -54,7 +55,9 @@ def record_phase2_audit(
     action_request_id=None,
     backup_id=None,
     verification_id=None,
+    isolation_action_id=None,
     actor_id: str | None = None,
+    actor_type: str = "internal_component",
     source_component: str | None = None,
     reason: str | None = None,
     safe_metadata: dict | None = None,
@@ -63,7 +66,7 @@ def record_phase2_audit(
     return record_audit_event(
         db,
         AuditEventCreate(
-            actor_type="internal_component",
+            actor_type=actor_type,
             actor_id=actor_id,
             action=action,
             result_status=result_status,
@@ -77,6 +80,7 @@ def record_phase2_audit(
             action_request_id=action_request_id,
             backup_id=backup_id,
             verification_id=verification_id,
+            isolation_action_id=isolation_action_id,
             source_component=source_component,
             reason=reason,
             safe_metadata=safe_metadata or {},
