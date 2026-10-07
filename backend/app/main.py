@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api import api_router
 from app.database.init_db import initialize_database
 from app.database.session import SessionLocal
+from app.models import IsolationAction
 from app.services.audit import record_phase2_audit
 
 
@@ -45,9 +46,17 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         "/api/internal/threats": ("threat_incident.create", "threat_incident"),
         "/api/internal/risk-assessments": ("risk_assessment.create", "risk_assessment"),
         "/api/internal/decisions": ("decision.create", "decision"),
+        "/api/internal/backups": ("backup.registration_rejected", "backup"),
     }
-    if path in internal_resources:
-        action, resource_type = internal_resources[path]
+    matched_resource = internal_resources.get(path)
+    if path.startswith("/api/internal/integrity-verifications/") and path.endswith("/result"):
+        matched_resource = ("integrity_verification.result_rejected", "integrity_verification")
+    if path.startswith("/api/internal/isolation/") and path.endswith("/result"):
+        matched_resource = ("isolation.component_result_rejected", "isolation_action")
+    if matched_resource is None and path.startswith("/api/internal/backups/") and path.endswith("/protection-result"):
+        matched_resource = ("backup.protection_result_rejected", "backup")
+    if matched_resource is not None:
+        action, resource_type = matched_resource
         correlation_id = uuid4()
         try:
             body = loads(await request.body())
@@ -56,6 +65,23 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         except (JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
             pass
         with SessionLocal() as db:
+            audit_context = {}
+            if resource_type == "isolation_action":
+                try:
+                    isolation_action_id = UUID(path.split("/")[4])
+                    isolation_action = db.get(IsolationAction, str(isolation_action_id))
+                except (IndexError, ValueError):
+                    isolation_action = None
+                if isolation_action is not None:
+                    audit_context = {
+                        "resource_id": isolation_action.id,
+                        "isolation_action_id": isolation_action.id,
+                        "asset_id": isolation_action.asset_id,
+                        "incident_id": isolation_action.incident_id,
+                        "decision_id": isolation_action.decision_id,
+                        "action_request_id": isolation_action.action_request_id,
+                        "correlation_id": isolation_action.correlation_id,
+                    }
             record_phase2_audit(
                 db,
                 action=action,
@@ -65,6 +91,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
                 source_component="internal_api",
                 reason="Request validation failed",
                 safe_metadata={"method": request.method, "path": path},
+                **audit_context,
             )
             db.commit()
 

@@ -36,5 +36,10 @@ for route_module in (
 ):
     api_router.include_router(route_module.router)
 
-for route_module in (security_events, threats, risk_assessments, decisions):
+for route_module in (security_events, threats, risk_assessments, decisions, backups, integrity_verifications, isolation):
     api_router.include_router(route_module.internal_router)
+
+api_router.include_router(integrity_verifications.backup_router)
+api_router.include_router(backups.recovery_points_router)
+api_router.include_router(isolation.request_router)
+api_router.include_router(isolation.asset_router)

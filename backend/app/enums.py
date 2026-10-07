@@ -105,6 +105,27 @@ class IsolationExecutionStatus(StringEnum):
     CANCELLED = "cancelled"
 
 
+class IsolationMode(StringEnum):
+    NETWORK = "network"
+    HOST = "host"
+    FULL = "full"
+
+
+class IsolationNetworkState(StringEnum):
+    CONNECTED = "connected"
+    ISOLATING = "isolating"
+    ISOLATED = "isolated"
+    RELEASING = "releasing"
+    UNKNOWN = "unknown"
+
+
+class AssetIsolationState(StringEnum):
+    NOT_ISOLATED = "not_isolated"
+    ISOLATION_PENDING = "isolation_pending"
+    ISOLATED = "isolated"
+    RELEASE_PENDING = "release_pending"
+
+
 class RecoveryJobStatus(StringEnum):
     REQUESTED = "requested"
     AWAITING_APPROVAL = "awaiting_approval"

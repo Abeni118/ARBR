@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -23,18 +23,18 @@ from app.services.backup_readiness import assess_recovery_eligibility
 from app.services.internal_auth import require_backup_component
 
 router = APIRouter(prefix="/api/backups", tags=["Backups"])
+recovery_points_router = APIRouter(prefix="/api/assets", tags=["Backups"])
 internal_router = APIRouter(prefix="/api/internal/backups", tags=["Internal Backup Component"])
 
 
 def _candidate(db: Session, backup: Backup) -> BackupCandidateRead:
     eligibility = assess_recovery_eligibility(db, backup)
-    candidate = BackupCandidateRead.model_validate(backup)
-    return candidate.model_copy(
-        update={
-            "verified": eligibility.verified,
-            "recovery_eligible": eligibility.eligible,
-            "eligibility_reasons": eligibility.reasons,
-        }
+    safe_metadata = BackupRead.model_validate(backup).model_dump()
+    return BackupCandidateRead(
+        **safe_metadata,
+        verified=eligibility.verified,
+        recovery_eligible=eligibility.eligible,
+        eligibility_reasons=eligibility.reasons,
     )
 
 
@@ -101,8 +101,8 @@ def register_backup(
         size_bytes=payload.size_bytes,
         storage_reference=payload.storage_reference,
         manifest_reference=payload.manifest_reference,
-        protection_status=payload.protection_status.value,
-        lifecycle_status=payload.lifecycle_status.value,
+        protection_status=payload.protection_status,
+        lifecycle_status=payload.lifecycle_status,
         encryption_status=payload.encryption_status,
         correlation_id=str(correlation_id),
     )
@@ -173,6 +173,8 @@ def report_protection_result(
             raise HTTPException(status_code=404, detail="Action request not found")
         if action_request.action_type != "protect_backup" or action_request.backup_id != backup.id:
             raise HTTPException(status_code=409, detail="Action request does not target this backup protection operation")
+        if action_request.asset_id != backup.asset_id:
+            raise HTTPException(status_code=409, detail="Action request asset does not match the backup")
         if action_request.correlation_id and payload.correlation_id and action_request.correlation_id != str(payload.correlation_id):
             raise HTTPException(status_code=409, detail="Correlation ID does not match the action request")
 
@@ -180,16 +182,16 @@ def report_protection_result(
         payload.correlation_id
         or (UUID(action_request.correlation_id) if action_request else UUID(backup.correlation_id))
     )
-    backup.protection_status = payload.protection_status.value
+    backup.protection_status = payload.protection_status
     if action_request is not None:
-        action_request.execution_status = payload.execution_status.value
-        action_request.started_at = action_request.started_at or datetime.now().astimezone()
+        action_request.execution_status = payload.execution_status
+        action_request.started_at = action_request.started_at or datetime.now(timezone.utc)
         if payload.execution_status != ActionExecutionStatus.EXECUTING:
-            action_request.completed_at = as_utc(payload.completed_at) if payload.completed_at else datetime.now().astimezone()
+            action_request.completed_at = as_utc(payload.completed_at) if payload.completed_at else datetime.now(timezone.utc)
         action_request.failure_reason = payload.failure_reason
         action_request.component_result = {
             "component_reference": payload.component_reference,
-            "protection_status": payload.protection_status.value,
+            "protection_status": payload.protection_status,
         }
     if payload.execution_status == ActionExecutionStatus.EXECUTING:
         action = "backup.protection.started"
@@ -213,7 +215,7 @@ def report_protection_result(
         actor_id="backup_component",
         source_component="backup_component",
         reason=payload.failure_reason,
-        safe_metadata={"execution_status": payload.execution_status.value},
+        safe_metadata={"execution_status": payload.execution_status},
     )
     db.commit()
     db.refresh(backup)
@@ -273,6 +275,7 @@ def get_recovery_eligibility(backup_id: UUID, db: Session = Depends(get_db)):
         asset_id=backup.asset_id,
         correlation_id=backup.correlation_id,
         source_component="api",
+        actor_type="system",
         reason=", ".join(eligibility.reasons) if eligibility.reasons else None,
     )
     db.commit()
@@ -280,6 +283,62 @@ def get_recovery_eligibility(backup_id: UUID, db: Session = Depends(get_db)):
         eligible=eligibility.eligible,
         backup_id=backup.id,
         reasons=eligibility.reasons,
+    )
+
+
+@router.post("/{backup_id}/select-for-recovery", response_model=RecoveryEligibilityRead)
+def select_backup_for_recovery(backup_id: UUID, db: Session = Depends(get_db)):
+    """Record a readiness-checked selection only; this does not execute recovery."""
+    backup = get_or_404(db, Backup, str(backup_id), "Backup")
+    eligibility = assess_recovery_eligibility(db, backup)
+    if not eligibility.eligible:
+        record_phase2_audit(
+            db,
+            action="backup.selected_for_recovery",
+            result_status="rejected",
+            resource_type="backup",
+            resource_id=backup.id,
+            backup_id=backup.id,
+            asset_id=backup.asset_id,
+            correlation_id=backup.correlation_id,
+            actor_type="user",
+            source_component="api",
+            reason=", ".join(eligibility.reasons),
+        )
+        db.commit()
+        raise HTTPException(status_code=409, detail={"eligible": False, "reasons": eligibility.reasons})
+    record_phase2_audit(
+        db,
+        action="backup.selected_for_recovery",
+        result_status="success",
+        resource_type="backup",
+        resource_id=backup.id,
+        backup_id=backup.id,
+        asset_id=backup.asset_id,
+        correlation_id=backup.correlation_id,
+        actor_type="user",
+        source_component="api",
+    )
+    db.commit()
+    return RecoveryEligibilityRead(eligible=True, backup_id=backup.id, reasons=[])
+
+
+@recovery_points_router.get("/{asset_id}/recovery-points", response_model=Page[BackupCandidateRead])
+def list_asset_recovery_points(
+    asset_id: UUID,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    if db.get(Asset, str(asset_id)) is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    query = db.query(Backup).filter(Backup.asset_id == str(asset_id))
+    page_result = paginate(query.order_by(Backup.backup_created_at.desc()), page, page_size)
+    return Page[BackupCandidateRead](
+        items=[_candidate(db, backup) for backup in page_result.items],
+        page=page_result.page,
+        page_size=page_result.page_size,
+        total=page_result.total,
     )
 
 

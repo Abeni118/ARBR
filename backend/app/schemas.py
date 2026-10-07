@@ -8,6 +8,7 @@ from pydantic import AliasChoices, AfterValidator, BaseModel, ConfigDict, Field,
 from .enums import (
     ActionExecutionStatus,
     ActionType,
+    AssetIsolationState,
     ApprovalStatus,
     BackupLifecycleStatus,
     BackupProtectionStatus,
@@ -17,6 +18,8 @@ from .enums import (
     EventSeverity,
     IncidentLifecycleStatus,
     IsolationExecutionStatus,
+    IsolationMode,
+    IsolationNetworkState,
     RecoveryJobStatus,
     RiskAssessmentStatus,
     RiskLevel,
@@ -51,6 +54,7 @@ _SECRET_VALUE_PATTERNS = (
     ),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]+=*", re.IGNORECASE),
+    re.compile(r"[a-z][a-z0-9+.-]*://[^/@:\s]+:[^/@\s]+@", re.IGNORECASE),
 )
 
 
@@ -337,6 +341,7 @@ class ActionRequestCreate(APIModel):
     asset_id: UUID | None = None
     backup_id: UUID | None = None
     verification_id: UUID | None = None
+    isolation_mode: IsolationMode | None = None
     requested_by_type: str = Field(min_length=1, max_length=50)
     requested_by_id: str | None = Field(default=None, max_length=255)
     request_reason: str | None = None
@@ -344,12 +349,29 @@ class ActionRequestCreate(APIModel):
 
     @model_validator(mode="after")
     def validate_safe_reason(self):
+        if self.action_type == ActionType.ISOLATE:
+            if self.asset_id is None or self.isolation_mode is None:
+                raise ValueError("isolate requests require asset_id and isolation_mode")
+        elif self.isolation_mode is not None:
+            raise ValueError("isolation_mode is only valid for isolate requests")
+        if self.action_type == ActionType.RELEASE_ISOLATION:
+            raise ValueError("Use the isolation release endpoint for release_isolation requests")
         _reject_sensitive_content(self.request_reason)
         return self
 
 
 class ActionRequestApproval(APIModel):
     approved_by_id: str = Field(min_length=1, max_length=255)
+
+
+class ActionRequestRejection(APIModel):
+    rejected_by_id: str = Field(min_length=1, max_length=255)
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_reason(self):
+        _reject_sensitive_content(self.reason)
+        return self
 
 
 class ActionRequestRead(APIModel):
@@ -360,6 +382,7 @@ class ActionRequestRead(APIModel):
     asset_id: UUID | None
     backup_id: UUID | None
     verification_id: UUID | None
+    isolation_mode: IsolationMode | None
     requested_by_type: str
     requested_by_id: str | None
     request_reason: str | None
@@ -394,6 +417,7 @@ class BackupCreate(APIModel):
     def validate_safe_references(self):
         _reject_sensitive_content(self.storage_reference)
         _reject_sensitive_content(self.manifest_reference)
+        _reject_sensitive_content(self.encryption_status)
         return self
 
 
@@ -457,8 +481,6 @@ class IntegrityVerificationResult(APIModel):
         if self.result_status == VerificationStatus.QUEUED:
             raise ValueError("Component results cannot set verification status to queued")
         if self.result_status == VerificationStatus.PASSED:
-            if not (self.expected_digest or self.trusted_manifest_reference):
-                raise ValueError("A passed result requires an expected digest or trusted manifest reference")
             if not (self.observed_digest or self.verification_evidence_reference):
                 raise ValueError("A passed result requires observed digest or verification evidence")
         _reject_sensitive_content(self.trusted_manifest_reference)
@@ -531,24 +553,86 @@ class IsolationActionCreate(APIModel):
     action_request_id: UUID
     asset_id: UUID
     incident_id: UUID | None = None
-    isolation_mode: str | None = Field(default=None, max_length=100)
+    decision_id: UUID | None = None
+    isolation_mode: IsolationMode
+    reason: str | None = None
     correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_reason(self):
+        _reject_sensitive_content(self.reason)
+        return self
+
+
+class IsolationReleaseCreate(APIModel):
+    requested_by_type: str = Field(min_length=1, max_length=50)
+    requested_by_id: str | None = Field(default=None, max_length=255)
+    reason: str | None = None
+    correlation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_reason(self):
+        _reject_sensitive_content(self.reason)
+        return self
+
+
+class IsolationComponentResult(APIModel):
+    execution_status: IsolationExecutionStatus
+    network_state: IsolationNetworkState
+    acknowledged_at: UTCDateTime | None = None
+    completed_at: UTCDateTime | None = None
+    component_reference: str = Field(min_length=1, max_length=255)
+    failure_reason: str | None = None
+    correlation_id: UUID
+
+    @model_validator(mode="after")
+    def validate_component_result(self):
+        if self.execution_status not in {
+            IsolationExecutionStatus.EXECUTING,
+            IsolationExecutionStatus.ISOLATED,
+            IsolationExecutionStatus.RELEASED,
+            IsolationExecutionStatus.FAILED,
+            IsolationExecutionStatus.CANCELLED,
+        }:
+            raise ValueError("Component result status must be executing, isolated, released, failed, or cancelled")
+        if self.execution_status == IsolationExecutionStatus.ISOLATED and self.network_state != IsolationNetworkState.ISOLATED:
+            raise ValueError("Confirmed isolation requires network_state=isolated")
+        if self.execution_status == IsolationExecutionStatus.FAILED and not self.failure_reason:
+            raise ValueError("Failed isolation results require failure_reason")
+        _reject_sensitive_content(self.component_reference)
+        _reject_sensitive_content(self.failure_reason)
+        return self
 
 
 class IsolationActionRead(APIModel):
-    id: UUID
+    isolation_action_id: UUID = Field(validation_alias=AliasChoices("isolation_action_id", "id"))
     action_request_id: UUID
     asset_id: UUID
     incident_id: UUID | None
+    decision_id: UUID | None
+    operation: ActionType
     execution_status: IsolationExecutionStatus
-    isolation_mode: str | None
-    network_state: str | None
+    isolation_mode: IsolationMode | None
+    network_state: IsolationNetworkState | None
     requested_at: UTCDateTime
     acknowledged_at: UTCDateTime | None
+    completed_at: UTCDateTime | None
     released_at: UTCDateTime | None
     component_reference: str | None
     failure_reason: str | None
     correlation_id: UUID
+
+
+class AssetIsolationRead(APIModel):
+    asset_id: UUID
+    isolation_state: AssetIsolationState
+    active_isolation_action_id: UUID | None
+    execution_status: IsolationExecutionStatus | None
+    network_state: IsolationNetworkState | None
+    isolation_mode: IsolationMode | None
+    requested_at: UTCDateTime | None
+    acknowledged_at: UTCDateTime | None
+    component_reference: str | None
 
 
 class RecoveryJobCreate(APIModel):
@@ -596,6 +680,7 @@ class AuditEventCreate(APIModel):
     action_request_id: UUID | None = None
     backup_id: UUID | None = None
     verification_id: UUID | None = None
+    isolation_action_id: UUID | None = None
     recovery_job_id: UUID | None = None
     source_component: str | None = Field(default=None, max_length=100)
     reason: str | None = None
@@ -625,6 +710,7 @@ class AuditEventRead(APIModel):
     action_request_id: UUID | None
     backup_id: UUID | None
     verification_id: UUID | None
+    isolation_action_id: UUID | None
     recovery_job_id: UUID | None
     source_component: str | None
     reason: str | None
