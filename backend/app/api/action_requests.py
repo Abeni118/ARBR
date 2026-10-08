@@ -17,16 +17,17 @@ from app.schemas import (
     Page,
 )
 from app.services.audit import record_audit_event
+from app.services.recovery_validation import validate_recovery_prerequisites
 
 router = APIRouter(prefix="/api/action-requests", tags=["Action Requests"])
 
 
-@router.post("", response_model=ActionRequestRead, status_code=status.HTTP_201_CREATED)
-def create_action_request(payload: ActionRequestCreate, db: Session = Depends(get_db)):
+def _create_action_request(payload: ActionRequestCreate, db: Session) -> ActionRequest:
     if payload.action_type not in (
         ActionType.PROTECT_BACKUP.value,
         ActionType.VERIFY_BACKUP.value,
         ActionType.ISOLATE.value,
+        ActionType.RECOVER.value,
     ):
         raise HTTPException(status_code=422, detail="This action type must use its dedicated workflow endpoint")
 
@@ -58,6 +59,13 @@ def create_action_request(payload: ActionRequestCreate, db: Session = Depends(ge
 
     if payload.action_type == ActionType.ISOLATE.value and asset is None:
         raise HTTPException(status_code=422, detail="isolate requests require an existing asset_id")
+    if payload.action_type == ActionType.RECOVER.value and not all(
+        (asset, incident, backup, verification)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="recover requests require asset_id, incident_id, backup_id, and verification_id",
+        )
 
     asset_id = str(payload.asset_id) if payload.asset_id else (backup.asset_id if backup else verification.asset_id)
     if backup and backup.asset_id != asset_id:
@@ -77,6 +85,19 @@ def create_action_request(payload: ActionRequestCreate, db: Session = Depends(ge
         affected_asset_ids = {incident.asset_id, *(item.id for item in incident.affected_assets)}
         if asset_id not in affected_asset_ids:
             raise HTTPException(status_code=409, detail="Action asset is not affected by the incident")
+    if payload.action_type == ActionType.RECOVER.value:
+        # A request may be recorded while awaiting approval or containment, but
+        # all entity/link/backup-verification gates are checked here and again
+        # at job creation and immediately before dispatch.
+        validate_recovery_prerequisites(
+            db,
+            asset_id=asset_id,
+            incident_id=incident.id,
+            backup_id=backup.id,
+            verification_id=verification.id,
+            decision_id=decision.id if decision else None,
+            require_isolation=False,
+        )
     if decision and decision.approval_required and payload.action_type == ActionType.ISOLATE.value:
         approval_status = "pending"
     elif decision and payload.action_type == ActionType.ISOLATE.value:
@@ -87,6 +108,7 @@ def create_action_request(payload: ActionRequestCreate, db: Session = Depends(ge
     correlation_id = (
         payload.correlation_id
         or (UUID(decision.correlation_id) if decision else None)
+        or (UUID(incident.correlation_id) if payload.action_type == ActionType.RECOVER.value and incident else None)
         or (UUID(verification.correlation_id) if verification else None)
         or (UUID(incident.correlation_id) if incident else None)
         or uuid4()
@@ -120,6 +142,8 @@ def create_action_request(payload: ActionRequestCreate, db: Session = Depends(ge
                 if backup and payload.action_type == ActionType.PROTECT_BACKUP.value
                 else "isolation.requested"
                 if payload.action_type == ActionType.ISOLATE.value
+                else "recovery.requested"
+                if payload.action_type == ActionType.RECOVER.value
                 else "integrity_verification.action_requested"
             ),
             result_status="success",
@@ -160,6 +184,29 @@ def create_action_request(payload: ActionRequestCreate, db: Session = Depends(ge
     return action_request
 
 
+@router.post("", response_model=ActionRequestRead, status_code=status.HTTP_201_CREATED)
+def create_action_request(payload: ActionRequestCreate, db: Session = Depends(get_db)):
+    try:
+        return _create_action_request(payload, db)
+    except HTTPException as exc:
+        if payload.action_type == ActionType.RECOVER:
+            record_audit_event(
+                db,
+                AuditEventCreate(
+                    actor_type=payload.requested_by_type,
+                    actor_id=payload.requested_by_id,
+                    action="recovery.request_rejected",
+                    result_status="rejected",
+                    resource_type="action_request",
+                    source_component="api",
+                    reason=(exc.detail.get("code") if isinstance(exc.detail, dict) else str(exc.detail)),
+                    correlation_id=payload.correlation_id,
+                ),
+            )
+            db.commit()
+        raise
+
+
 @router.post("/{action_request_id}/approve", response_model=ActionRequestRead)
 def approve_action_request(
     action_request_id: UUID,
@@ -171,6 +218,7 @@ def approve_action_request(
         ActionType.PROTECT_BACKUP.value,
         ActionType.ISOLATE.value,
         ActionType.RELEASE_ISOLATION.value,
+        ActionType.RECOVER.value,
     }
     if action_request.action_type not in approvable_types:
         raise HTTPException(status_code=409, detail="This action type does not use the approval transition")
@@ -195,6 +243,8 @@ def approve_action_request(
                 if action_request.action_type == ActionType.RELEASE_ISOLATION.value
                 else "isolation.approved"
                 if action_request.action_type == ActionType.ISOLATE.value
+                else "recovery.approved"
+                if action_request.action_type == ActionType.RECOVER.value
                 else "backup.protection.approved"
             ),
             result_status="success",
@@ -225,6 +275,7 @@ def reject_action_request(
     if action_request.action_type not in {
         ActionType.ISOLATE.value,
         ActionType.RELEASE_ISOLATION.value,
+        ActionType.RECOVER.value,
     }:
         raise HTTPException(status_code=409, detail="Only isolation requests use this rejection transition")
     if action_request.approval_status != "pending":
@@ -246,6 +297,8 @@ def reject_action_request(
             action=(
                 "isolation.release.rejected"
                 if action_request.action_type == ActionType.RELEASE_ISOLATION.value
+                else "recovery.rejected"
+                if action_request.action_type == ActionType.RECOVER.value
                 else "isolation.rejected"
             ),
             result_status="rejected",

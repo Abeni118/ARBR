@@ -46,6 +46,11 @@ def initialize_database() -> None:
             connection.execute(text("ALTER TABLE isolation_actions ADD COLUMN parent_isolation_action_id VARCHAR(36)"))
         if "completed_at" not in isolation_columns:
             connection.execute(text("ALTER TABLE isolation_actions ADD COLUMN completed_at TIMESTAMP WITH TIME ZONE"))
+        recovery_columns = {
+            column["name"] for column in inspect(connection).get_columns("recovery_jobs")
+        }
+        if "result_evidence_reference" not in recovery_columns:
+            connection.execute(text("ALTER TABLE recovery_jobs ADD COLUMN result_evidence_reference VARCHAR(1024)"))
         audit_columns = {column["name"] for column in inspect(connection).get_columns("audit_events")}
         if "isolation_action_id" not in audit_columns:
             connection.execute(text("ALTER TABLE audit_events ADD COLUMN isolation_action_id VARCHAR(36)"))
