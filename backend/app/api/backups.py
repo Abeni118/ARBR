@@ -20,11 +20,13 @@ from app.schemas import (
 )
 from app.services.audit import record_phase2_audit
 from app.services.backup_readiness import assess_recovery_eligibility
-from app.services.internal_auth import require_backup_component
+from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
+from app.services.user_auth import UserPrincipal, UserRole, get_current_user, require_role
 
-router = APIRouter(prefix="/api/backups", tags=["Backups"])
-recovery_points_router = APIRouter(prefix="/api/assets", tags=["Backups"])
+router = APIRouter(prefix="/api/backups", tags=["Backups"], dependencies=[Depends(get_current_user)])
+recovery_points_router = APIRouter(prefix="/api/assets", tags=["Backups"], dependencies=[Depends(get_current_user)])
 internal_router = APIRouter(prefix="/api/internal/backups", tags=["Internal Backup Component"])
+backup_component = require_component_scope(ComponentScope.BACKUPS_WRITE)
 
 
 def _candidate(db: Session, backup: Backup) -> BackupCandidateRead:
@@ -42,12 +44,13 @@ def _candidate(db: Session, backup: Backup) -> BackupCandidateRead:
     "",
     response_model=BackupRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_backup_component)],
+    dependencies=[Depends(backup_component)],
 )
 def register_backup(
     payload: BackupCreate,
     response: Response,
     db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(backup_component),
 ):
     correlation_id = payload.correlation_id or uuid4()
     asset = db.get(Asset, str(payload.asset_id))
@@ -59,8 +62,8 @@ def register_backup(
             resource_type="backup",
             asset_id=payload.asset_id,
             correlation_id=correlation_id,
-            actor_id=payload.created_by_component,
-            source_component=payload.created_by_component,
+            actor_id=component.component_id,
+            source_component=component.component_id,
             reason="Asset not found",
         )
         db.commit()
@@ -84,8 +87,8 @@ def register_backup(
             backup_id=existing.id,
             asset_id=existing.asset_id,
             correlation_id=existing.correlation_id,
-            actor_id=payload.created_by_component,
-            source_component=payload.created_by_component,
+            actor_id=component.component_id,
+            source_component=component.component_id,
             reason="Existing producer identity returned unchanged",
         )
         db.commit()
@@ -130,8 +133,8 @@ def register_backup(
             backup_id=existing.id,
             asset_id=existing.asset_id,
             correlation_id=existing.correlation_id,
-            actor_id=payload.created_by_component,
-            source_component=payload.created_by_component,
+            actor_id=component.component_id,
+            source_component=component.component_id,
             reason="Concurrent duplicate producer identity returned unchanged",
         )
         db.commit()
@@ -147,8 +150,8 @@ def register_backup(
         backup_id=backup.id,
         asset_id=asset.id,
         correlation_id=correlation_id,
-        actor_id=payload.created_by_component,
-        source_component=payload.created_by_component,
+        actor_id=component.component_id,
+        source_component=component.component_id,
     )
     db.commit()
     db.refresh(backup)
@@ -158,12 +161,13 @@ def register_backup(
 @internal_router.post(
     "/{backup_id}/protection-result",
     response_model=BackupProtectionResultRead,
-    dependencies=[Depends(require_backup_component)],
+    dependencies=[Depends(backup_component)],
 )
 def report_protection_result(
     backup_id: UUID,
     payload: BackupProtectionResult,
     db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(backup_component),
 ):
     backup = get_or_404(db, Backup, str(backup_id), "Backup")
     action_request = None
@@ -212,8 +216,8 @@ def report_protection_result(
         asset_id=backup.asset_id,
         action_request_id=action_request.id if action_request else None,
         correlation_id=correlation_id,
-        actor_id="backup_component",
-        source_component="backup_component",
+        actor_id=component.component_id,
+        source_component=component.component_id,
         reason=payload.failure_reason,
         safe_metadata={"execution_status": payload.execution_status},
     )
@@ -287,7 +291,11 @@ def get_recovery_eligibility(backup_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/{backup_id}/select-for-recovery", response_model=RecoveryEligibilityRead)
-def select_backup_for_recovery(backup_id: UUID, db: Session = Depends(get_db)):
+def select_backup_for_recovery(
+    backup_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
     """Record a readiness-checked selection only; this does not execute recovery."""
     backup = get_or_404(db, Backup, str(backup_id), "Backup")
     eligibility = assess_recovery_eligibility(db, backup)
@@ -302,6 +310,7 @@ def select_backup_for_recovery(backup_id: UUID, db: Session = Depends(get_db)):
             asset_id=backup.asset_id,
             correlation_id=backup.correlation_id,
             actor_type="user",
+            actor_id=current_user.user_id,
             source_component="api",
             reason=", ".join(eligibility.reasons),
         )
@@ -317,6 +326,7 @@ def select_backup_for_recovery(backup_id: UUID, db: Session = Depends(get_db)):
         asset_id=backup.asset_id,
         correlation_id=backup.correlation_id,
         actor_type="user",
+        actor_id=current_user.user_id,
         source_component="api",
     )
     db.commit()

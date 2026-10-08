@@ -7,21 +7,41 @@ from sqlalchemy.orm import Session
 from app.api.common import get_or_404, paginate
 from app.database.session import get_db
 from app.models import Asset
-from app.schemas import AssetCreate, AssetRead, Page
+from app.schemas import AssetCreate, AssetRead, AuditEventCreate, Page
+from app.services.audit import record_audit_event
+from app.services.user_auth import UserPrincipal, UserRole, get_current_user, require_role
 
-router = APIRouter(prefix="/api/assets", tags=["assets"])
+router = APIRouter(prefix="/api/assets", tags=["assets"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("", response_model=AssetRead, status_code=status.HTTP_201_CREATED)
-def create_asset(payload: AssetCreate, db: Session = Depends(get_db)):
+def create_asset(
+    payload: AssetCreate,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
     """Register an asset record; this does not connect to or isolate a host."""
     asset = Asset(**payload.model_dump())
     db.add(asset)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Asset external reference already exists") from exc
+    record_audit_event(
+        db,
+        AuditEventCreate(
+            actor_type="user",
+            actor_id=current_user.user_id,
+            action="asset.created",
+            result_status="success",
+            resource_type="asset",
+            resource_id=asset.id,
+            asset_id=asset.id,
+            source_component="api",
+        ),
+    )
+    db.commit()
     db.refresh(asset)
     return asset
 

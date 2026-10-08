@@ -11,9 +11,16 @@ from app.models import Asset, RiskAssessment, ThreatIncident
 from app.risk import risk_level_for_score
 from app.schemas import Page, RiskAssessmentCreate, RiskAssessmentRead
 from app.services.audit import record_phase2_audit
+from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
+from app.services.user_auth import get_current_user
 
-router = APIRouter(prefix="/api/risk-assessments", tags=["risk-assessments"])
-internal_router = APIRouter(prefix="/api/internal/risk-assessments", tags=["internal-risk-assessments"])
+router = APIRouter(prefix="/api/risk-assessments", tags=["risk-assessments"], dependencies=[Depends(get_current_user)])
+risk_assessment_component = require_component_scope(ComponentScope.RISK_ASSESSMENTS_WRITE)
+internal_router = APIRouter(
+    prefix="/api/internal/risk-assessments",
+    tags=["internal-risk-assessments"],
+    dependencies=[Depends(risk_assessment_component)],
+)
 
 
 def _reject_assessment(db: Session, payload: RiskAssessmentCreate, detail: str, code: int):
@@ -30,7 +37,11 @@ def _reject_assessment(db: Session, payload: RiskAssessmentCreate, detail: str, 
 
 
 @internal_router.post("", response_model=RiskAssessmentRead, status_code=status.HTTP_201_CREATED)
-def create_risk_assessment(payload: RiskAssessmentCreate, db: Session = Depends(get_db)):
+def create_risk_assessment(
+    payload: RiskAssessmentCreate,
+    db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(risk_assessment_component),
+):
     incident = db.get(ThreatIncident, str(payload.incident_id))
     if incident is None:
         _reject_assessment(db, payload, "Threat incident not found", status.HTTP_404_NOT_FOUND)
@@ -67,8 +78,8 @@ def create_risk_assessment(payload: RiskAssessmentCreate, db: Session = Depends(
         asset_id=asset.id,
         assessment_id=assessment.id,
         correlation_id=correlation_id,
-        actor_id=payload.model_version,
-        source_component="risk_assessment_service",
+        actor_id=component.component_id,
+        source_component=component.component_id,
         safe_metadata={"score": assessment.score, "risk_level": assessment.risk_level},
     )
     db.commit()

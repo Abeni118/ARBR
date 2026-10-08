@@ -11,9 +11,16 @@ from app.models import Asset, SecurityEvent, ThreatIncident
 from app.schemas import Page, ThreatIncidentCreate, ThreatIncidentRead
 from app.services.asset_resolution import resolve_asset
 from app.services.audit import record_phase2_audit
+from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
+from app.services.user_auth import UserPrincipal, UserRole, get_current_user, require_role
 
-router = APIRouter(prefix="/api/threats", tags=["threats"])
-internal_router = APIRouter(prefix="/api/internal/threats", tags=["internal-threats"])
+router = APIRouter(prefix="/api/threats", tags=["threats"], dependencies=[Depends(get_current_user)])
+threat_component = require_component_scope(ComponentScope.THREATS_WRITE)
+internal_router = APIRouter(
+    prefix="/api/internal/threats",
+    tags=["internal-threats"],
+    dependencies=[Depends(threat_component)],
+)
 
 
 def _reject_create(db: Session, payload: ThreatIncidentCreate, detail: str, code: int):
@@ -30,7 +37,11 @@ def _reject_create(db: Session, payload: ThreatIncidentCreate, detail: str, code
 
 
 @internal_router.post("", response_model=ThreatIncidentRead, status_code=status.HTTP_201_CREATED)
-def create_threat(payload: ThreatIncidentCreate, db: Session = Depends(get_db)):
+def create_threat(
+    payload: ThreatIncidentCreate,
+    db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(threat_component),
+):
     resolved_assets: dict[str, Asset] = {}
     try:
         if payload.asset_id:
@@ -88,8 +99,8 @@ def create_threat(payload: ThreatIncidentCreate, db: Session = Depends(get_db)):
         incident_id=incident.id,
         asset_id=primary_asset.id,
         correlation_id=correlation_id,
-        actor_id=payload.detection_source,
-        source_component=payload.detection_source,
+        actor_id=component.component_id,
+        source_component=component.component_id,
         safe_metadata={"event_count": len(events), "affected_asset_count": len(resolved_assets)},
     )
     db.commit()
@@ -97,7 +108,14 @@ def create_threat(payload: ThreatIncidentCreate, db: Session = Depends(get_db)):
     return incident
 
 
-def _apply_transition(incident_id: UUID, *, allowed_from: set[str], target: str, db: Session) -> ThreatIncident:
+def _apply_transition(
+    incident_id: UUID,
+    *,
+    allowed_from: set[str],
+    target: str,
+    db: Session,
+    actor: UserPrincipal,
+) -> ThreatIncident:
     incident = get_or_404(db, ThreatIncident, str(incident_id), "Threat incident")
     previous = incident.lifecycle_status
     if previous not in allowed_from:
@@ -110,6 +128,8 @@ def _apply_transition(incident_id: UUID, *, allowed_from: set[str], target: str,
             incident_id=incident.id,
             asset_id=incident.asset_id,
             correlation_id=incident.correlation_id,
+            actor_type="user",
+            actor_id=actor.user_id,
             reason=f"Transition from {previous} to {target} is not allowed",
             safe_metadata={"from": previous, "to": target},
         )
@@ -130,6 +150,8 @@ def _apply_transition(incident_id: UUID, *, allowed_from: set[str], target: str,
         incident_id=incident.id,
         asset_id=incident.asset_id,
         correlation_id=incident.correlation_id,
+        actor_type="user",
+        actor_id=actor.user_id,
         safe_metadata={"from": previous, "to": target},
     )
     db.commit()
@@ -138,27 +160,44 @@ def _apply_transition(incident_id: UUID, *, allowed_from: set[str], target: str,
 
 
 @router.post("/{incident_id}/triage", response_model=ThreatIncidentRead)
-def triage_threat(incident_id: UUID, db: Session = Depends(get_db)):
-    return _apply_transition(incident_id, allowed_from={"new"}, target="triaged", db=db)
+def triage_threat(
+    incident_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
+    return _apply_transition(incident_id, allowed_from={"new"}, target="triaged", db=db, actor=current_user)
 
 
 @router.post("/{incident_id}/investigate", response_model=ThreatIncidentRead)
-def investigate_threat(incident_id: UUID, db: Session = Depends(get_db)):
-    return _apply_transition(incident_id, allowed_from={"triaged"}, target="investigating", db=db)
+def investigate_threat(
+    incident_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
+    return _apply_transition(incident_id, allowed_from={"triaged"}, target="investigating", db=db, actor=current_user)
 
 
 @router.post("/{incident_id}/resolve", response_model=ThreatIncidentRead)
-def resolve_threat(incident_id: UUID, db: Session = Depends(get_db)):
-    return _apply_transition(incident_id, allowed_from={"recovered"}, target="resolved", db=db)
+def resolve_threat(
+    incident_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
+    return _apply_transition(incident_id, allowed_from={"recovered"}, target="resolved", db=db, actor=current_user)
 
 
 @router.post("/{incident_id}/false-positive", response_model=ThreatIncidentRead)
-def mark_false_positive(incident_id: UUID, db: Session = Depends(get_db)):
+def mark_false_positive(
+    incident_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
     return _apply_transition(
         incident_id,
         allowed_from={"new", "triaged", "investigating"},
         target="false_positive",
         db=db,
+        actor=current_user,
     )
 
 

@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models import RiskAssessment, SecurityEvent, ThreatIncident
 from app.schemas import DashboardSummary, SecurityEventRead
+from app.services.user_auth import get_current_user
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/summary", response_model=DashboardSummary)
