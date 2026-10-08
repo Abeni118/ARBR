@@ -21,6 +21,7 @@ from .enums import (
     IsolationMode,
     IsolationNetworkState,
     RecoveryJobStatus,
+    RecoveryCheckStatus,
     RiskAssessmentStatus,
     RiskLevel,
     VerificationStatus,
@@ -352,6 +353,9 @@ class ActionRequestCreate(APIModel):
         if self.action_type == ActionType.ISOLATE:
             if self.asset_id is None or self.isolation_mode is None:
                 raise ValueError("isolate requests require asset_id and isolation_mode")
+        elif self.action_type == ActionType.RECOVER:
+            if not all((self.asset_id, self.incident_id, self.backup_id, self.verification_id)):
+                raise ValueError("recover requests require asset_id, incident_id, backup_id, and verification_id")
         elif self.isolation_mode is not None:
             raise ValueError("isolation_mode is only valid for isolate requests")
         if self.action_type == ActionType.RELEASE_ISOLATION:
@@ -644,6 +648,11 @@ class RecoveryJobCreate(APIModel):
     recovery_environment: str | None = Field(default=None, max_length=255)
     correlation_id: UUID | None = None
 
+    @model_validator(mode="after")
+    def validate_safe_environment(self):
+        _reject_sensitive_content(self.recovery_environment)
+        return self
+
 
 class RecoveryJobRead(APIModel):
     id: UUID
@@ -662,7 +671,68 @@ class RecoveryJobRead(APIModel):
     outcome: str | None
     failure_reason: str | None
     component_reference: str | None
+    result_evidence_reference: str | None
     correlation_id: UUID
+
+
+class RecoveryComponentClaim(APIModel):
+    component_reference: str = Field(min_length=1, max_length=255)
+    correlation_id: UUID
+
+    @model_validator(mode="after")
+    def validate_component_reference(self):
+        _reject_sensitive_content(self.component_reference)
+        return self
+
+
+class RecoveryComponentResult(APIModel):
+    job_status: RecoveryJobStatus
+    asset_id: UUID
+    incident_id: UUID
+    backup_id: UUID
+    verification_id: UUID
+    correlation_id: UUID
+    component_reference: str = Field(min_length=1, max_length=255)
+    malware_scan_status: RecoveryCheckStatus
+    security_validation_status: RecoveryCheckStatus
+    outcome: str | None = Field(default=None, max_length=4000)
+    failure_reason: str | None = Field(default=None, max_length=4000)
+    result_evidence_reference: str | None = Field(default=None, max_length=1024)
+
+    @model_validator(mode="after")
+    def validate_component_result(self):
+        if self.job_status not in {
+            RecoveryJobStatus.SCANNING,
+            RecoveryJobStatus.COMPLETED,
+            RecoveryJobStatus.FAILED,
+        }:
+            raise ValueError("Component result status must be scanning, completed, or failed")
+        if self.job_status == RecoveryJobStatus.FAILED and not self.failure_reason:
+            raise ValueError("Failed recovery results require failure_reason")
+        if self.job_status == RecoveryJobStatus.COMPLETED:
+            if self.malware_scan_status != RecoveryCheckStatus.PASSED:
+                raise ValueError("Completed recovery requires a passed malware scan")
+            if self.security_validation_status != RecoveryCheckStatus.PASSED:
+                raise ValueError("Completed recovery requires passed security validation")
+            if not self.result_evidence_reference:
+                raise ValueError("Completed recovery requires a result evidence reference")
+            if not self.outcome:
+                raise ValueError("Completed recovery requires a component-reported outcome")
+        _reject_sensitive_content(self.component_reference)
+        _reject_sensitive_content(self.outcome)
+        _reject_sensitive_content(self.failure_reason)
+        _reject_sensitive_content(self.result_evidence_reference)
+        return self
+
+
+class RecoveryJobCancel(APIModel):
+    cancelled_by_id: str = Field(min_length=1, max_length=255)
+    reason: str = Field(min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_reason(self):
+        _reject_sensitive_content(self.reason)
+        return self
 
 
 class AuditEventCreate(APIModel):

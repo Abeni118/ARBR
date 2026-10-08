@@ -426,6 +426,7 @@ class RecoveryJob(UUIDPrimaryKey, Base):
     outcome: Mapped[str | None] = mapped_column(Text)
     failure_reason: Mapped[str | None] = mapped_column(Text)
     component_reference: Mapped[str | None] = mapped_column(String(255))
+    result_evidence_reference: Mapped[str | None] = mapped_column(String(1024))
     correlation_id: Mapped[str] = mapped_column(String(36), default=new_id, nullable=False, index=True)
 
     action_request: Mapped[ActionRequest] = relationship(back_populates="recovery_job")

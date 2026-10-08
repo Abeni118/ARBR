@@ -6,7 +6,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
-from app.models import IsolationAction
+from app.models import IsolationAction, RecoveryJob
 from app.schemas import AuditEventCreate
 from app.services.audit import record_audit_event
 
@@ -19,6 +19,7 @@ def _audit_denied_component_request(db: Session, request: Request) -> None:
     incident_id = None
     decision_id = None
     action_request_id = None
+    recovery_job_id = None
     correlation_id = None
     resource_type = "internal_component_request"
     action = "internal_component.request_rejected"
@@ -37,6 +38,20 @@ def _audit_denied_component_request(db: Session, request: Request) -> None:
                 correlation_id = UUID(isolation_action.correlation_id)
         except (IndexError, ValueError):
             pass
+    elif path.startswith("/api/internal/recovery-jobs/"):
+        action = "recovery.component_result_rejected"
+        resource_type = "recovery_job"
+        try:
+            recovery_job_id = UUID(path.split("/")[4])
+            resource_id = recovery_job_id
+            job = db.get(RecoveryJob, str(recovery_job_id))
+            if job is not None:
+                asset_id = UUID(job.asset_id)
+                incident_id = UUID(job.incident_id)
+                action_request_id = UUID(job.action_request_id)
+                correlation_id = UUID(job.correlation_id)
+        except (IndexError, ValueError):
+            pass
     record_audit_event(
         db,
         AuditEventCreate(
@@ -50,6 +65,7 @@ def _audit_denied_component_request(db: Session, request: Request) -> None:
             decision_id=decision_id,
             action_request_id=action_request_id,
             isolation_action_id=isolation_action_id,
+            recovery_job_id=recovery_job_id,
             source_component="internal_api",
             reason="Internal component authentication failed or is not configured",
             safe_metadata={"method": request.method, "path": path},

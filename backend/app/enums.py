@@ -141,6 +141,14 @@ class RecoveryJobStatus(StringEnum):
     CANCELLED = "cancelled"
 
 
+class RecoveryCheckStatus(StringEnum):
+    NOT_STARTED = "not_started"
+    RUNNING = "running"
+    PASSED = "passed"
+    FAILED = "failed"
+    INCONCLUSIVE = "inconclusive"
+
+
 class CutoverStatus(StringEnum):
     NOT_REQUESTED = "not_requested"
     PENDING_APPROVAL = "pending_approval"

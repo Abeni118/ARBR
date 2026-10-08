@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api import api_router
 from app.database.init_db import initialize_database
 from app.database.session import SessionLocal
-from app.models import IsolationAction
+from app.models import IsolationAction, RecoveryJob
 from app.services.audit import record_phase2_audit
 
 
@@ -49,10 +49,21 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         "/api/internal/backups": ("backup.registration_rejected", "backup"),
     }
     matched_resource = internal_resources.get(path)
+    if path == "/api/action-requests" and request.method == "POST":
+        try:
+            body = loads(await request.body())
+        except (JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
+            body = None
+        if isinstance(body, dict) and body.get("action_type") == "recover":
+            matched_resource = ("recovery.request_rejected", "action_request")
+    if path == "/api/recovery-jobs" and request.method == "POST":
+        matched_resource = ("recovery.request_rejected", "recovery_job")
     if path.startswith("/api/internal/integrity-verifications/") and path.endswith("/result"):
         matched_resource = ("integrity_verification.result_rejected", "integrity_verification")
     if path.startswith("/api/internal/isolation/") and path.endswith("/result"):
         matched_resource = ("isolation.component_result_rejected", "isolation_action")
+    if path.startswith("/api/internal/recovery-jobs/") and path.endswith(("/result", "/claim")):
+        matched_resource = ("recovery.component_result_rejected", "recovery_job")
     if matched_resource is None and path.startswith("/api/internal/backups/") and path.endswith("/protection-result"):
         matched_resource = ("backup.protection_result_rejected", "backup")
     if matched_resource is not None:
@@ -81,6 +92,23 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
                         "decision_id": isolation_action.decision_id,
                         "action_request_id": isolation_action.action_request_id,
                         "correlation_id": isolation_action.correlation_id,
+                    }
+            elif resource_type == "recovery_job":
+                try:
+                    recovery_job_id = UUID(path.split("/")[4])
+                    recovery_job = db.get(RecoveryJob, str(recovery_job_id))
+                except (IndexError, ValueError):
+                    recovery_job = None
+                if recovery_job is not None:
+                    audit_context = {
+                        "resource_id": recovery_job.id,
+                        "recovery_job_id": recovery_job.id,
+                        "asset_id": recovery_job.asset_id,
+                        "incident_id": recovery_job.incident_id,
+                        "action_request_id": recovery_job.action_request_id,
+                        "backup_id": recovery_job.backup_id,
+                        "verification_id": recovery_job.verification_id,
+                        "correlation_id": recovery_job.correlation_id,
                     }
             record_phase2_audit(
                 db,
