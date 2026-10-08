@@ -31,12 +31,21 @@ def db():
 @pytest.fixture
 def client(db: Session, monkeypatch):
     monkeypatch.setenv("BACKUP_COMPONENT_TOKEN", COMPONENT_TOKEN)
+    monkeypatch.setenv(
+        "MVP_USER_TOKENS",
+        '[{"token":"phase6-viewer-test-token","user_id":"phase6-viewer","role":"viewer"},'
+        '{"token":"phase6-analyst-test-token","user_id":"phase6-analyst","role":"analyst"},'
+        '{"token":"phase6-approver-test-token","user_id":"phase6-approver","role":"approver"},'
+        '{"token":"phase6-same-user-approver-test-token","user_id":"phase6-analyst","role":"approver"},'
+        '{"token":"phase6-admin-test-token","user_id":"phase6-admin","role":"admin"}]',
+    )
 
     def override_get_db():
         yield db
 
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
+        test_client.headers["Authorization"] = "Bearer phase6-analyst-test-token"
         yield test_client
     app.dependency_overrides.clear()
 
@@ -144,6 +153,7 @@ def test_isolation_approval_confirmed_result_and_idempotency(client: TestClient,
 
     approved = client.post(
         f"/api/action-requests/{action_request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"approved_by_id": "approver-4"},
     )
     assert approved.status_code == 200
@@ -310,6 +320,7 @@ def test_failed_isolation_never_confirms_asset_and_incident_contains_only_after_
     isolation_id = created.json()["isolation_action_id"]
     assert client.post(
         f"/api/action-requests/{action_request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"approved_by_id": "incident-approver"},
     ).status_code == 200
 
@@ -337,6 +348,7 @@ def test_rejected_isolation_approval_never_dispatches_or_confirms(client: TestCl
 
     rejected = client.post(
         f"/api/action-requests/{request['id']}/reject",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"rejected_by_id": "approver-4", "reason": "Containment was not authorized"},
     )
     assert rejected.status_code == 200
@@ -369,7 +381,11 @@ def test_release_requires_review_for_active_incident_then_component_confirmation
     action_request = _isolation_request(client, asset.id).json()
     created = _create_isolation(client, action_request, asset.id)
     isolation_id = created.json()["isolation_action_id"]
-    assert client.post(f"/api/action-requests/{action_request['id']}/approve", json={"approved_by_id": "release-test"}).status_code == 200
+    assert client.post(
+        f"/api/action-requests/{action_request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
+        json={"approved_by_id": "release-test"},
+    ).status_code == 200
     correlation_id = action_request["correlation_id"]
     assert _component_result(client, isolation_id, status_value="executing", network_state="isolating", correlation_id=correlation_id).status_code == 200
     assert _component_result(client, isolation_id, status_value="isolated", network_state="isolated", correlation_id=correlation_id).status_code == 200
@@ -388,6 +404,7 @@ def test_release_requires_review_for_active_incident_then_component_confirmation
 
     approved = client.post(
         f"/api/action-requests/{release_request_id}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"approved_by_id": "release-approver"},
     )
     assert approved.status_code == 200
@@ -464,6 +481,7 @@ def test_release_requires_review_for_active_incident_then_component_confirmation
     later_isolation_body = later_isolation.json()
     assert client.post(
         f"/api/action-requests/{later_request_body['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"approved_by_id": "later-isolation-approver"},
     ).status_code == 200
     later_correlation = later_request_body["correlation_id"]
@@ -489,6 +507,7 @@ def test_release_requires_review_for_active_incident_then_component_confirmation
     ).json()
     assert client.post(
         f"/api/action-requests/{second_release['action_request_id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"approved_by_id": "release-failure-approver"},
     ).status_code == 200
     second_release_id = second_release["isolation_action_id"]
@@ -579,7 +598,11 @@ def test_incident_relationship_and_release_policy_review(client: TestClient, db:
     )
     assert isolation_response.status_code == 201
     isolation_id = isolation_response.json()["isolation_action_id"]
-    client.post(f"/api/action-requests/{action_request['id']}/approve", json={"approved_by_id": "review-test"})
+    client.post(
+        f"/api/action-requests/{action_request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
+        json={"approved_by_id": "review-test"},
+    )
     correlation_id = action_request["correlation_id"]
     assert _component_result(client, isolation_id, status_value="executing", network_state="isolating", correlation_id=correlation_id).status_code == 200
     assert _component_result(client, isolation_id, status_value="isolated", network_state="isolated", correlation_id=correlation_id).status_code == 200

@@ -36,6 +36,8 @@ from app.schemas import (
     ThreatIncidentCreate,
     ThreatIncidentRead,
 )
+from app.services.internal_auth import ComponentPrincipal
+from app.services.user_auth import UserPrincipal, UserRole
 
 
 @pytest.fixture
@@ -69,13 +71,14 @@ def test_phase2_end_to_end_workflow_and_audit(db: Session):
         evidence={"process_name": "sample.exe"},
         correlation_id=correlation_id,
     )
-    first = ingest_security_event(event_payload, Response(), db)
+    detector = ComponentPrincipal("phase2-test-monitor", frozenset({"security_events:write"}))
+    first = ingest_security_event(event_payload, Response(), db, detector)
     assert first.duplicate is False
     assert first.event.asset_id == UUID(asset.id)
     assert first.correlation_id == correlation_id
     assert SecurityEventRead.model_validate(first.event).correlation_id == correlation_id
 
-    duplicate = ingest_security_event(event_payload, Response(), db)
+    duplicate = ingest_security_event(event_payload, Response(), db, detector)
     assert duplicate.duplicate is True
     assert duplicate.event.id == first.event.id
     assert db.scalar(select(func.count(SecurityEvent.id))) == 1
@@ -83,7 +86,7 @@ def test_phase2_end_to_end_workflow_and_audit(db: Session):
     other_source_event = SecurityEventCreate(
         **{**event_payload.model_dump(), "source": "another-monitor"}
     )
-    distinct_source = ingest_security_event(other_source_event, Response(), db)
+    distinct_source = ingest_security_event(other_source_event, Response(), db, detector)
     assert distinct_source.duplicate is False
 
     incident_payload = ThreatIncidentCreate(
@@ -96,7 +99,10 @@ def test_phase2_end_to_end_workflow_and_audit(db: Session):
         detection_source="test-monitor",
         detected_at=datetime.now(timezone.utc),
     )
-    incident = create_threat(incident_payload, db)
+    threat_component = ComponentPrincipal("phase2-test-threat", frozenset({"threats:write"}))
+    risk_component = ComponentPrincipal("phase2-test-risk", frozenset({"risk_assessments:write"}))
+    decision_engine = ComponentPrincipal("phase2-test-decision", frozenset({"decisions:write"}))
+    incident = create_threat(incident_payload, db, threat_component)
     assert incident.lifecycle_status == "new"
     assert incident.correlation_id == str(correlation_id)
     assert incident.security_events[0].id == str(first.event.id)
@@ -104,10 +110,10 @@ def test_phase2_end_to_end_workflow_and_audit(db: Session):
     assert ThreatIncidentRead.model_validate(incident).affected_asset_ids == [UUID(asset.id)]
 
     assessment_78 = create_risk_assessment(
-        RiskAssessmentCreate(incident_id=UUID(incident.id), asset_id=UUID(asset.id), score=78), db
+        RiskAssessmentCreate(incident_id=UUID(incident.id), asset_id=UUID(asset.id), score=78), db, risk_component
     )
     assessment_85 = create_risk_assessment(
-        RiskAssessmentCreate(incident_id=UUID(incident.id), asset_id=UUID(asset.id), score=85), db
+        RiskAssessmentCreate(incident_id=UUID(incident.id), asset_id=UUID(asset.id), score=85), db, risk_component
     )
     assert assessment_78.risk_level == "HIGH"
     assert assessment_85.risk_level == "CRITICAL"
@@ -125,6 +131,7 @@ def test_phase2_end_to_end_workflow_and_audit(db: Session):
             decision_engine_version="test-engine-1",
         ),
         db,
+        decision_engine,
     )
     assert decision.decision_status == "proposed"
     assert decision.correlation_id == assessment_85.correlation_id
@@ -141,13 +148,15 @@ def test_phase2_end_to_end_workflow_and_audit(db: Session):
                 rationale="Must reject an unknown assessment",
             ),
             db,
+            decision_engine,
         )
     assert mismatched_decision.value.status_code == 404
 
-    triaged = triage_threat(UUID(incident.id), db)
+    analyst = UserPrincipal(user_id="phase2-analyst", role=UserRole.ANALYST)
+    triaged = triage_threat(UUID(incident.id), db, analyst)
     assert triaged.lifecycle_status == "triaged"
     with pytest.raises(HTTPException) as invalid_transition:
-        triage_threat(UUID(incident.id), db)
+        triage_threat(UUID(incident.id), db, analyst)
     assert invalid_transition.value.status_code == 409
 
     summary = dashboard_summary(db)
@@ -171,7 +180,9 @@ def test_phase2_end_to_end_workflow_and_audit(db: Session):
 def test_invalid_references_scores_and_correlations(db: Session):
     with pytest.raises(HTTPException) as missing_incident:
         create_risk_assessment(
-            RiskAssessmentCreate(incident_id=uuid4(), asset_id=uuid4(), score=78), db
+            RiskAssessmentCreate(incident_id=uuid4(), asset_id=uuid4(), score=78),
+            db,
+            ComponentPrincipal("phase2-test-risk", frozenset({"risk_assessments:write"})),
         )
     assert missing_incident.value.status_code == 404
     assert db.scalar(select(func.count(AuditEvent.id))) == 1
@@ -205,6 +216,7 @@ def test_invalid_references_scores_and_correlations(db: Session):
                 detected_at=datetime.now(timezone.utc),
             ),
             db,
+            ComponentPrincipal("phase2-test-threat", frozenset({"threats:write"})),
         )
     assert missing_event.value.status_code == 404
     assert db.scalar(select(func.count(ThreatIncident.id))) == 0

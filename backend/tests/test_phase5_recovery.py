@@ -42,12 +42,21 @@ def db():
 @pytest.fixture
 def client(db: Session, monkeypatch):
     monkeypatch.setenv("BACKUP_COMPONENT_TOKEN", COMPONENT_TOKEN)
+    monkeypatch.setenv(
+        "MVP_USER_TOKENS",
+        '[{"token":"phase6-viewer-test-token","user_id":"phase6-viewer","role":"viewer"},'
+        '{"token":"phase6-analyst-test-token","user_id":"phase6-analyst","role":"analyst"},'
+        '{"token":"phase6-approver-test-token","user_id":"phase6-approver","role":"approver"},'
+        '{"token":"phase6-same-user-approver-test-token","user_id":"phase6-analyst","role":"approver"},'
+        '{"token":"phase6-admin-test-token","user_id":"phase6-admin","role":"admin"}]',
+    )
 
     def override_get_db():
         yield db
 
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
+        test_client.headers["Authorization"] = "Bearer phase6-analyst-test-token"
         yield test_client
     app.dependency_overrides.clear()
 
@@ -271,6 +280,7 @@ def test_recovery_request_is_pending_and_recommendation_is_not_approval(client: 
 
     rejected = client.post(
         f"/api/action-requests/{body['id']}/reject",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"rejected_by_id": "approver", "reason": "Recovery not authorized"},
     )
     assert rejected.status_code == 200
@@ -289,6 +299,7 @@ def test_recovery_job_creation_requires_all_gates_and_preserves_correlation(clie
     request = _request(client, context).json()
     approved = client.post(
         f"/api/action-requests/{request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"approved_by_id": "recovery-approver"},
     )
     assert approved.status_code == 200
@@ -348,6 +359,7 @@ def test_recovery_job_creation_rejects_invalid_safety_gates(
     request_body = request.json()
     approved = client.post(
         f"/api/action-requests/{request_body['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"approved_by_id": "approver"},
     ).json()
     response = _create_job(client, approved, context)
@@ -429,6 +441,7 @@ def test_recovery_action_request_reference_and_decision_mismatches_are_rejected(
     db.commit()
     approved = client.post(
         f"/api/action-requests/{request_body['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
         json={"approved_by_id": "approver"},
     ).json()
     result = _create_job(client, approved, context)
@@ -440,7 +453,11 @@ def test_recovery_action_request_reference_and_decision_mismatches_are_rejected(
 def test_recovery_job_rejects_action_request_reference_mismatch(client: TestClient, db: Session, field: str):
     context = _context(db)
     request = _request(client, context).json()
-    client.post(f"/api/action-requests/{request['id']}/approve", json={"approved_by_id": "approver"})
+    client.post(
+        f"/api/action-requests/{request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
+        json={"approved_by_id": "approver"},
+    )
     action_request = db.get(ActionRequest, request["id"])
     if field == "asset_id":
         action_request.asset_id = context["other_asset"].id
@@ -468,7 +485,11 @@ def test_recovery_job_rejects_action_request_reference_mismatch(client: TestClie
 def test_recovery_dispatch_revalidates_before_queueing(client: TestClient, db: Session):
     context = _context(db)
     request = _request(client, context).json()
-    client.post(f"/api/action-requests/{request['id']}/approve", json={"approved_by_id": "approver"})
+    client.post(
+        f"/api/action-requests/{request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
+        json={"approved_by_id": "approver"},
+    )
     job = _create_job(client, request, context).json()
 
     context["backup"].lifecycle_status = "quarantined"
@@ -482,7 +503,11 @@ def test_recovery_dispatch_revalidates_before_queueing(client: TestClient, db: S
 def test_dispatch_and_trusted_component_result_lifecycle(client: TestClient, db: Session):
     context = _context(db)
     request = _request(client, context).json()
-    client.post(f"/api/action-requests/{request['id']}/approve", json={"approved_by_id": "approver"})
+    client.post(
+        f"/api/action-requests/{request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
+        json={"approved_by_id": "approver"},
+    )
     job = _create_job(client, request, context).json()
 
     queued = client.post(f"/api/recovery-jobs/{job['id']}/dispatch")
@@ -552,7 +577,11 @@ def test_dispatch_and_trusted_component_result_lifecycle(client: TestClient, db:
 def test_failed_recovery_is_terminal_and_audited(client: TestClient, db: Session):
     context = _context(db)
     request = _request(client, context).json()
-    client.post(f"/api/action-requests/{request['id']}/approve", json={"approved_by_id": "approver"})
+    client.post(
+        f"/api/action-requests/{request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
+        json={"approved_by_id": "approver"},
+    )
     job = _create_job(client, request, context).json()
     assert client.post(f"/api/recovery-jobs/{job['id']}/dispatch").status_code == 200
     assert _claim(client, job).status_code == 200
@@ -574,7 +603,11 @@ def test_failed_recovery_is_terminal_and_audited(client: TestClient, db: Session
 def test_dispatch_requires_current_confirmed_isolation(client: TestClient, db: Session):
     context = _context(db)
     request = _request(client, context).json()
-    client.post(f"/api/action-requests/{request['id']}/approve", json={"approved_by_id": "approver"})
+    client.post(
+        f"/api/action-requests/{request['id']}/approve",
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
+        json={"approved_by_id": "approver"},
+    )
     job = _create_job(client, request, context).json()
     # A release after job creation invalidates isolation before dispatch.
     original = db.query(IsolationAction).filter_by(asset_id=context["asset"].id).one()
