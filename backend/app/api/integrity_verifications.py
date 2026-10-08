@@ -17,14 +17,24 @@ from app.schemas import (
     Page,
 )
 from app.services.audit import record_audit_event, record_phase2_audit
-from app.services.internal_auth import require_backup_component
+from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
+from app.services.user_auth import UserPrincipal, UserRole, get_current_user, require_role
 
-router = APIRouter(prefix="/api/integrity-verifications", tags=["Integrity Verification"])
-backup_router = APIRouter(prefix="/api/backups", tags=["Integrity Verification"])
+router = APIRouter(
+    prefix="/api/integrity-verifications",
+    tags=["Integrity Verification"],
+    dependencies=[Depends(get_current_user)],
+)
+backup_router = APIRouter(
+    prefix="/api/backups",
+    tags=["Integrity Verification"],
+    dependencies=[Depends(get_current_user)],
+)
 internal_router = APIRouter(
     prefix="/api/internal/integrity-verifications",
     tags=["Internal Integrity Component"],
 )
+verification_component = require_component_scope(ComponentScope.VERIFICATION_WRITE)
 
 
 @backup_router.post(
@@ -36,6 +46,7 @@ def request_integrity_verification(
     backup_id: UUID,
     payload: IntegrityVerificationCreate,
     db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
 ):
     backup = get_or_404(db, Backup, str(backup_id), "Backup")
     correlation_id = payload.correlation_id or uuid4()
@@ -52,7 +63,7 @@ def request_integrity_verification(
         backup_id=backup.id,
         verification_id=verification.id,
         requested_by_type="user",
-        requested_by_id=payload.requested_by,
+        requested_by_id=current_user.user_id,
         request_reason=payload.reason,
         approval_status="pending",
         execution_status="not_started",
@@ -64,7 +75,7 @@ def request_integrity_verification(
         db,
         AuditEventCreate(
             actor_type="user",
-            actor_id=payload.requested_by,
+            actor_id=current_user.user_id,
             action="integrity_verification.requested",
             result_status="success",
             resource_type="integrity_verification",
@@ -92,12 +103,13 @@ def request_integrity_verification(
 @internal_router.post(
     "/{verification_id}/result",
     response_model=IntegrityVerificationRead,
-    dependencies=[Depends(require_backup_component)],
+    dependencies=[Depends(verification_component)],
 )
 def report_integrity_result(
     verification_id: UUID,
     payload: IntegrityVerificationResult,
     db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(verification_component),
 ):
     verification = get_or_404(db, IntegrityVerification, str(verification_id), "Integrity verification")
     backup = get_or_404(db, Backup, verification.backup_id, "Backup")
@@ -128,7 +140,7 @@ def report_integrity_result(
     verification.trusted_manifest_reference = trusted_manifest_reference
     verification.observed_digest = payload.observed_digest
     verification.verification_evidence_reference = payload.verification_evidence_reference
-    verification.verifier_component = payload.verifier_component
+    verification.verifier_component = component.component_id
     verification.verifier_version = payload.verifier_version
     verification.started_at = (
         as_utc(payload.started_at) if payload.started_at else verification.started_at
@@ -183,8 +195,8 @@ def report_integrity_result(
         action_request_id=action_request.id if action_request else None,
         asset_id=backup.asset_id,
         correlation_id=verification.correlation_id,
-        actor_id=payload.verifier_component,
-        source_component=payload.verifier_component,
+        actor_id=component.component_id,
+        source_component=component.component_id,
         reason=payload.failure_reason,
         safe_metadata={"verifier_version": payload.verifier_version} if payload.verifier_version else {},
     )

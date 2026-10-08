@@ -6,8 +6,9 @@ from app.database.init_db import DEFAULT_SETTINGS
 from app.database.session import get_db
 from app.models import SystemSettings
 from app.schemas import SystemSettingsRead
+from app.services.user_auth import get_current_user
 
-router = APIRouter(prefix="/api/settings", tags=["settings"])
+router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("", response_model=SystemSettingsRead)

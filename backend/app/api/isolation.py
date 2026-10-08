@@ -27,13 +27,19 @@ from app.schemas import (
     Page,
 )
 from app.services.audit import record_audit_event
-from app.services.internal_auth import require_backup_component
+from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
 from app.services.isolation_state import ACTIVE_ISOLATION_STATUSES, get_asset_isolation_state
+from app.services.user_auth import UserPrincipal, UserRole, get_current_user, require_role
 
-router = APIRouter(prefix="/api/isolation", tags=["Isolation"])
-request_router = APIRouter(prefix="/api/isolation-requests", tags=["Isolation"])
-asset_router = APIRouter(prefix="/api/assets", tags=["Isolation"])
+router = APIRouter(prefix="/api/isolation", tags=["Isolation"], dependencies=[Depends(get_current_user)])
+request_router = APIRouter(
+    prefix="/api/isolation-requests",
+    tags=["Isolation"],
+    dependencies=[Depends(get_current_user)],
+)
+asset_router = APIRouter(prefix="/api/assets", tags=["Isolation"], dependencies=[Depends(get_current_user)])
 internal_router = APIRouter(prefix="/api/internal/isolation", tags=["Internal Isolation Component"])
+isolation_component = require_component_scope(ComponentScope.ISOLATION_WRITE)
 
 ACTIVE_INCIDENT_STATES = {"new", "triaged", "investigating", "contained", "recovery_in_progress"}
 TERMINAL_ISOLATION_STATUSES = {
@@ -133,6 +139,7 @@ def create_isolation_action(
     payload: IsolationActionCreate,
     response: Response,
     db: Session = Depends(get_db),
+    _current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
 ):
     asset = db.get(Asset, str(payload.asset_id))
     if asset is None:
@@ -318,6 +325,7 @@ def request_isolation_release(
     payload: IsolationReleaseCreate,
     response: Response,
     db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
 ):
     original = get_or_404(db, IsolationAction, str(isolation_action_id), "Isolation action")
     if original.action_request.action_type != ActionType.ISOLATE.value or original.execution_status != IsolationExecutionStatus.ISOLATED.value:
@@ -366,8 +374,8 @@ def request_isolation_release(
         decision_id=original.decision_id,
         incident_id=original.incident_id,
         asset_id=original.asset_id,
-        requested_by_type=payload.requested_by_type,
-        requested_by_id=payload.requested_by_id,
+        requested_by_type="user",
+        requested_by_id=current_user.user_id,
         request_reason=payload.reason,
         approval_status="pending",
         execution_status="not_started",
@@ -394,8 +402,8 @@ def request_isolation_release(
         result_status="pending_approval",
         isolation_action=release_action,
         action_request=action_request,
-        actor_type=payload.requested_by_type,
-        actor_id=payload.requested_by_id,
+        actor_type="user",
+        actor_id=current_user.user_id,
         reason=payload.reason,
     )
     _audit(
@@ -404,8 +412,8 @@ def request_isolation_release(
         result_status="pending",
         isolation_action=release_action,
         action_request=action_request,
-        actor_type=payload.requested_by_type,
-        actor_id=payload.requested_by_id,
+        actor_type="user",
+        actor_id=current_user.user_id,
         reason=payload.reason,
     )
     db.commit()
@@ -416,12 +424,13 @@ def request_isolation_release(
 @internal_router.post(
     "/{isolation_action_id}/result",
     response_model=IsolationActionRead,
-    dependencies=[Depends(require_backup_component)],
+    dependencies=[Depends(isolation_component)],
 )
 def report_isolation_result(
     isolation_action_id: UUID,
     payload: IsolationComponentResult,
     db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(isolation_component),
 ):
     isolation_action = get_or_404(db, IsolationAction, str(isolation_action_id), "Isolation action")
     action_request = isolation_action.action_request
@@ -664,7 +673,7 @@ def report_isolation_result(
         db,
         AuditEventCreate(
             actor_type="internal_component",
-            actor_id="isolation_component",
+            actor_id=component.component_id,
             action=action,
             result_status=outcome,
             resource_type="isolation_action",
@@ -674,7 +683,7 @@ def report_isolation_result(
             decision_id=isolation_action.decision_id,
             action_request_id=action_request.id,
             isolation_action_id=isolation_action.id,
-            source_component="isolation_component",
+            source_component=component.component_id,
             reason=payload.failure_reason,
             safe_metadata={"execution_status": payload.execution_status, "network_state": payload.network_state},
             correlation_id=isolation_action.correlation_id,

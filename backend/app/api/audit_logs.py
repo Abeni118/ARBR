@@ -8,8 +8,9 @@ from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.models import AuditEvent
 from app.schemas import AuditEventRead, Page
+from app.services.user_auth import get_current_user
 
-router = APIRouter(prefix="/api/audit-logs", tags=["Audit Logs"])
+router = APIRouter(prefix="/api/audit-logs", tags=["Audit Logs"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("", response_model=Page[AuditEventRead])

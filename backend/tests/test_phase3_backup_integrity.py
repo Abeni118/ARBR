@@ -28,12 +28,21 @@ def db():
 @pytest.fixture
 def client(db: Session, monkeypatch):
     monkeypatch.setenv("BACKUP_COMPONENT_TOKEN", "phase3-test-component-token")
+    monkeypatch.setenv(
+        "MVP_USER_TOKENS",
+        '[{"token":"phase6-viewer-test-token","user_id":"phase6-viewer","role":"viewer"},'
+        '{"token":"phase6-analyst-test-token","user_id":"phase6-analyst","role":"analyst"},'
+        '{"token":"phase6-approver-test-token","user_id":"phase6-approver","role":"approver"},'
+        '{"token":"phase6-same-user-approver-test-token","user_id":"phase6-analyst","role":"approver"},'
+        '{"token":"phase6-admin-test-token","user_id":"phase6-admin","role":"admin"}]',
+    )
 
     def override_get_db():
         yield db
 
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
+        test_client.headers["Authorization"] = "Bearer phase6-analyst-test-token"
         yield test_client
     app.dependency_overrides.clear()
 
@@ -124,7 +133,8 @@ def test_phase3_backup_protection_verification_and_readiness(client: TestClient,
     assert action_request["execution_status"] == "not_started"
     approved = client.post(
         f"/api/action-requests/{action_request['id']}/approve",
-        json={"approved_by_id": "approver-1"},
+        headers={"Authorization": "Bearer phase6-approver-test-token"},
+        json={"approved_by_id": "spoofed-approver-id"},
     )
     assert approved.status_code == 200
     assert approved.json()["approval_status"] == "approved"
@@ -201,7 +211,7 @@ def test_phase3_backup_protection_verification_and_readiness(client: TestClient,
 
     verification_request = client.post(
         f"/api/backups/{backup_id}/integrity-verifications",
-        json={"reason": "Scheduled integrity check", "requested_by": "operator-1", "correlation_id": correlation_id},
+        json={"reason": "Scheduled integrity check", "requested_by": "spoofed-requester", "correlation_id": correlation_id},
     )
     assert verification_request.status_code == 201
     requested = verification_request.json()

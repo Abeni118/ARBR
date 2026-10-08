@@ -18,11 +18,17 @@ from app.schemas import (
     RecoveryJobRead,
 )
 from app.services.audit import record_audit_event
-from app.services.internal_auth import require_backup_component
+from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
 from app.services.recovery_validation import validate_recovery_prerequisites
+from app.services.user_auth import UserPrincipal, UserRole, get_current_user, require_role
 
-router = APIRouter(prefix="/api/recovery-jobs", tags=["recovery"])
+router = APIRouter(
+    prefix="/api/recovery-jobs",
+    tags=["recovery"],
+    dependencies=[Depends(get_current_user)],
+)
 internal_router = APIRouter(prefix="/api/internal/recovery-jobs", tags=["Internal Recovery Component"])
+recovery_component = require_component_scope(ComponentScope.RECOVERY_WRITE)
 
 TERMINAL_STATUSES = {RecoveryJobStatus.COMPLETED.value, RecoveryJobStatus.FAILED.value, RecoveryJobStatus.CANCELLED.value}
 
@@ -148,7 +154,12 @@ def get_recovery_job(recovery_job_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=RecoveryJobRead, status_code=status.HTTP_201_CREATED)
-def create_recovery_job(payload: RecoveryJobCreate, response: Response, db: Session = Depends(get_db)):
+def create_recovery_job(
+    payload: RecoveryJobCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    _current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
     action_request = db.get(ActionRequest, str(payload.action_request_id))
     if action_request is None:
         _reject(db, "action_request_not_found", "ActionRequest not found", status_code=404)
@@ -220,7 +231,11 @@ def create_recovery_job(payload: RecoveryJobCreate, response: Response, db: Sess
 
 
 @router.post("/{recovery_job_id}/dispatch", response_model=RecoveryJobRead)
-def dispatch_recovery_job(recovery_job_id: UUID, db: Session = Depends(get_db)):
+def dispatch_recovery_job(
+    recovery_job_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
     job = get_or_404(db, RecoveryJob, str(recovery_job_id), "Recovery job")
     if job.job_status == RecoveryJobStatus.QUEUED.value:
         return job
@@ -235,14 +250,26 @@ def dispatch_recovery_job(recovery_job_id: UUID, db: Session = Depends(get_db)):
     _validate_job(db, job)
     job.job_status = RecoveryJobStatus.QUEUED.value
     job.action_request.execution_status = "queued"
-    _audit(db, action="recovery.dispatched", result_status="queued", recovery_job=job)
+    _audit(
+        db,
+        action="recovery.dispatched",
+        result_status="queued",
+        recovery_job=job,
+        actor_type="user",
+        actor_id=current_user.user_id,
+    )
     db.commit()
     db.refresh(job)
     return job
 
 
 @router.post("/{recovery_job_id}/cancel", response_model=RecoveryJobRead)
-def cancel_recovery_job(recovery_job_id: UUID, payload: RecoveryJobCancel, db: Session = Depends(get_db)):
+def cancel_recovery_job(
+    recovery_job_id: UUID,
+    payload: RecoveryJobCancel,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
     job = get_or_404(db, RecoveryJob, str(recovery_job_id), "Recovery job")
     if job.job_status not in {RecoveryJobStatus.APPROVED.value, RecoveryJobStatus.QUEUED.value}:
         _reject(db, "invalid_state_transition", "Recovery can only be cancelled before component execution", recovery_job=job)
@@ -259,7 +286,7 @@ def cancel_recovery_job(recovery_job_id: UUID, payload: RecoveryJobCancel, db: S
         result_status="cancelled",
         recovery_job=job,
         actor_type="user",
-        actor_id=payload.cancelled_by_id,
+        actor_id=current_user.user_id,
         reason=payload.reason,
     )
     db.commit()
@@ -270,9 +297,14 @@ def cancel_recovery_job(recovery_job_id: UUID, payload: RecoveryJobCancel, db: S
 @internal_router.post(
     "/{recovery_job_id}/claim",
     response_model=RecoveryJobRead,
-    dependencies=[Depends(require_backup_component)],
+    dependencies=[Depends(recovery_component)],
 )
-def claim_recovery_job(recovery_job_id: UUID, payload: RecoveryComponentClaim, db: Session = Depends(get_db)):
+def claim_recovery_job(
+    recovery_job_id: UUID,
+    payload: RecoveryComponentClaim,
+    db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(recovery_component),
+):
     job = get_or_404(db, RecoveryJob, str(recovery_job_id), "Recovery job")
     if str(payload.correlation_id) != job.correlation_id:
         _reject(db, "correlation_mismatch", "Correlation ID does not match the recovery job", recovery_job=job)
@@ -298,8 +330,8 @@ def claim_recovery_job(recovery_job_id: UUID, payload: RecoveryComponentClaim, d
         result_status="started",
         recovery_job=job,
         actor_type="internal_component",
-        actor_id=payload.component_reference,
-        source_component=payload.component_reference,
+        actor_id=component.component_id,
+        source_component=component.component_id,
     )
     db.commit()
     db.refresh(job)
@@ -309,12 +341,13 @@ def claim_recovery_job(recovery_job_id: UUID, payload: RecoveryComponentClaim, d
 @internal_router.post(
     "/{recovery_job_id}/result",
     response_model=RecoveryJobRead,
-    dependencies=[Depends(require_backup_component)],
+    dependencies=[Depends(recovery_component)],
 )
 def report_recovery_result(
     recovery_job_id: UUID,
     payload: RecoveryComponentResult,
     db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(recovery_component),
 ):
     job = get_or_404(db, RecoveryJob, str(recovery_job_id), "Recovery job")
     if (
@@ -388,8 +421,8 @@ def report_recovery_result(
         result_status="success" if target == RecoveryJobStatus.COMPLETED.value else target,
         recovery_job=job,
         actor_type="internal_component",
-        actor_id=payload.component_reference,
-        source_component=payload.component_reference,
+        actor_id=component.component_id,
+        source_component=component.component_id,
         reason=payload.failure_reason,
         safe_metadata={
             "malware_scan_status": payload.malware_scan_status,

@@ -343,8 +343,6 @@ class ActionRequestCreate(APIModel):
     backup_id: UUID | None = None
     verification_id: UUID | None = None
     isolation_mode: IsolationMode | None = None
-    requested_by_type: str = Field(min_length=1, max_length=50)
-    requested_by_id: str | None = Field(default=None, max_length=255)
     request_reason: str | None = None
     correlation_id: UUID | None = None
 
@@ -365,11 +363,10 @@ class ActionRequestCreate(APIModel):
 
 
 class ActionRequestApproval(APIModel):
-    approved_by_id: str = Field(min_length=1, max_length=255)
+    pass
 
 
 class ActionRequestRejection(APIModel):
-    rejected_by_id: str = Field(min_length=1, max_length=255)
     reason: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -456,13 +453,11 @@ class RecoveryEligibilityRead(APIModel):
 
 class IntegrityVerificationCreate(APIModel):
     reason: str | None = None
-    requested_by: str | None = Field(default=None, max_length=255)
     correlation_id: UUID | None = None
 
     @model_validator(mode="after")
     def validate_safe_request(self):
         _reject_sensitive_content(self.reason)
-        _reject_sensitive_content(self.requested_by)
         return self
 
 
@@ -569,8 +564,6 @@ class IsolationActionCreate(APIModel):
 
 
 class IsolationReleaseCreate(APIModel):
-    requested_by_type: str = Field(min_length=1, max_length=50)
-    requested_by_id: str | None = Field(default=None, max_length=255)
     reason: str | None = None
     correlation_id: UUID | None = None
 
@@ -726,7 +719,6 @@ class RecoveryComponentResult(APIModel):
 
 
 class RecoveryJobCancel(APIModel):
-    cancelled_by_id: str = Field(min_length=1, max_length=255)
     reason: str = Field(min_length=1, max_length=4000)
 
     @model_validator(mode="after")

@@ -18,11 +18,16 @@ from app.schemas import (
 )
 from app.services.audit import record_audit_event
 from app.services.recovery_validation import validate_recovery_prerequisites
+from app.services.user_auth import UserPrincipal, UserRole, get_current_user, require_role
 
-router = APIRouter(prefix="/api/action-requests", tags=["Action Requests"])
+router = APIRouter(
+    prefix="/api/action-requests",
+    tags=["Action Requests"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
-def _create_action_request(payload: ActionRequestCreate, db: Session) -> ActionRequest:
+def _create_action_request(payload: ActionRequestCreate, db: Session, current_user: UserPrincipal) -> ActionRequest:
     if payload.action_type not in (
         ActionType.PROTECT_BACKUP.value,
         ActionType.VERIFY_BACKUP.value,
@@ -123,8 +128,8 @@ def _create_action_request(payload: ActionRequestCreate, db: Session) -> ActionR
         backup_id=backup.id if backup else None,
         verification_id=verification.id if verification else None,
         isolation_mode=payload.isolation_mode if payload.isolation_mode else None,
-        requested_by_type=payload.requested_by_type,
-        requested_by_id=payload.requested_by_id,
+        requested_by_type="user",
+        requested_by_id=current_user.user_id,
         request_reason=payload.request_reason,
         approval_status=approval_status,
         execution_status="not_started",
@@ -135,8 +140,8 @@ def _create_action_request(payload: ActionRequestCreate, db: Session) -> ActionR
     record_audit_event(
         db,
         AuditEventCreate(
-            actor_type=payload.requested_by_type,
-            actor_id=payload.requested_by_id,
+            actor_type="user",
+            actor_id=current_user.user_id,
             action=(
                 "backup.protection.requested"
                 if backup and payload.action_type == ActionType.PROTECT_BACKUP.value
@@ -164,8 +169,8 @@ def _create_action_request(payload: ActionRequestCreate, db: Session) -> ActionR
         record_audit_event(
             db,
             AuditEventCreate(
-                actor_type=payload.requested_by_type,
-                actor_id=payload.requested_by_id,
+                actor_type="user",
+                actor_id=current_user.user_id,
                 action="isolation.approval_requested",
                 result_status="pending",
                 resource_type="action_request",
@@ -185,16 +190,20 @@ def _create_action_request(payload: ActionRequestCreate, db: Session) -> ActionR
 
 
 @router.post("", response_model=ActionRequestRead, status_code=status.HTTP_201_CREATED)
-def create_action_request(payload: ActionRequestCreate, db: Session = Depends(get_db)):
+def create_action_request(
+    payload: ActionRequestCreate,
+    db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.ANALYST)),
+):
     try:
-        return _create_action_request(payload, db)
+        return _create_action_request(payload, db, current_user)
     except HTTPException as exc:
         if payload.action_type == ActionType.RECOVER:
             record_audit_event(
                 db,
                 AuditEventCreate(
-                    actor_type=payload.requested_by_type,
-                    actor_id=payload.requested_by_id,
+                    actor_type="user",
+                    actor_id=current_user.user_id,
                     action="recovery.request_rejected",
                     result_status="rejected",
                     resource_type="action_request",
@@ -212,6 +221,7 @@ def approve_action_request(
     action_request_id: UUID,
     payload: ActionRequestApproval,
     db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.APPROVER)),
 ):
     action_request = get_or_404(db, ActionRequest, str(action_request_id), "Action request")
     approvable_types = {
@@ -222,10 +232,33 @@ def approve_action_request(
     }
     if action_request.action_type not in approvable_types:
         raise HTTPException(status_code=409, detail="This action type does not use the approval transition")
+    if action_request.requested_by_id == current_user.user_id:
+        record_audit_event(
+            db,
+            AuditEventCreate(
+                actor_type="user",
+                actor_id=current_user.user_id,
+                action="action_request.self_approval_rejected",
+                result_status="rejected",
+                resource_type="action_request",
+                resource_id=action_request.id,
+                action_request_id=action_request.id,
+                asset_id=action_request.asset_id,
+                incident_id=action_request.incident_id,
+                correlation_id=action_request.correlation_id,
+                source_component="api",
+                reason="Requester and approver must be different users",
+            ),
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "requester_cannot_approve", "message": "A requester cannot approve their own ActionRequest"},
+        )
     if action_request.approval_status != "pending":
         raise HTTPException(status_code=409, detail="Action request is not awaiting approval")
     action_request.approval_status = "approved"
-    action_request.approved_by_id = payload.approved_by_id
+    action_request.approved_by_id = current_user.user_id
     action_request.approved_at = datetime.now(timezone.utc)
     isolation_action = action_request.isolation_action
     if isolation_action is not None and isolation_action.execution_status in {
@@ -237,7 +270,7 @@ def approve_action_request(
         db,
         AuditEventCreate(
             actor_type="user",
-            actor_id=payload.approved_by_id,
+            actor_id=current_user.user_id,
             action=(
                 "isolation.release.approved"
                 if action_request.action_type == ActionType.RELEASE_ISOLATION.value
@@ -270,14 +303,39 @@ def reject_action_request(
     action_request_id: UUID,
     payload: ActionRequestRejection,
     db: Session = Depends(get_db),
+    current_user: UserPrincipal = Depends(require_role(UserRole.APPROVER)),
 ):
     action_request = get_or_404(db, ActionRequest, str(action_request_id), "Action request")
     if action_request.action_type not in {
         ActionType.ISOLATE.value,
         ActionType.RELEASE_ISOLATION.value,
         ActionType.RECOVER.value,
+        ActionType.PROTECT_BACKUP.value,
     }:
-        raise HTTPException(status_code=409, detail="Only isolation requests use this rejection transition")
+        raise HTTPException(status_code=409, detail="This action type does not use the rejection transition")
+    if action_request.requested_by_id == current_user.user_id:
+        record_audit_event(
+            db,
+            AuditEventCreate(
+                actor_type="user",
+                actor_id=current_user.user_id,
+                action="action_request.self_rejection_rejected",
+                result_status="rejected",
+                resource_type="action_request",
+                resource_id=action_request.id,
+                action_request_id=action_request.id,
+                asset_id=action_request.asset_id,
+                incident_id=action_request.incident_id,
+                correlation_id=action_request.correlation_id,
+                source_component="api",
+                reason="Requester and approver must be different users",
+            ),
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "requester_cannot_approve", "message": "A requester cannot reject their own ActionRequest"},
+        )
     if action_request.approval_status != "pending":
         raise HTTPException(status_code=409, detail="Action request is not awaiting approval")
     action_request.approval_status = "rejected"
@@ -293,7 +351,7 @@ def reject_action_request(
         db,
         AuditEventCreate(
             actor_type="user",
-            actor_id=payload.rejected_by_id,
+            actor_id=current_user.user_id,
             action=(
                 "isolation.release.rejected"
                 if action_request.action_type == ActionType.RELEASE_ISOLATION.value

@@ -10,9 +10,16 @@ from app.enums import DecisionStatus
 from app.models import Asset, Decision, RiskAssessment, ThreatIncident
 from app.schemas import DecisionCreate, DecisionRead, Page
 from app.services.audit import record_phase2_audit
+from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
+from app.services.user_auth import get_current_user
 
-router = APIRouter(prefix="/api/decisions", tags=["decisions"])
-internal_router = APIRouter(prefix="/api/internal/decisions", tags=["internal-decisions"])
+router = APIRouter(prefix="/api/decisions", tags=["decisions"], dependencies=[Depends(get_current_user)])
+decision_component = require_component_scope(ComponentScope.DECISIONS_WRITE)
+internal_router = APIRouter(
+    prefix="/api/internal/decisions",
+    tags=["internal-decisions"],
+    dependencies=[Depends(decision_component)],
+)
 
 
 def _reject_decision(db: Session, payload: DecisionCreate, detail: str, code: int):
@@ -29,7 +36,11 @@ def _reject_decision(db: Session, payload: DecisionCreate, detail: str, code: in
 
 
 @internal_router.post("", response_model=DecisionRead, status_code=status.HTTP_201_CREATED)
-def create_decision(payload: DecisionCreate, db: Session = Depends(get_db)):
+def create_decision(
+    payload: DecisionCreate,
+    db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(decision_component),
+):
     incident = db.get(ThreatIncident, str(payload.incident_id))
     if incident is None:
         _reject_decision(db, payload, "Threat incident not found", status.HTTP_404_NOT_FOUND)
@@ -76,8 +87,8 @@ def create_decision(payload: DecisionCreate, db: Session = Depends(get_db)):
         decision_id=decision.id,
         asset_id=asset.id,
         correlation_id=correlation_id,
-        actor_id=payload.decision_engine_version,
-        source_component="decision_engine",
+        actor_id=component.component_id,
+        source_component=component.component_id,
         safe_metadata={"recommended_action_count": len(decision.recommended_actions)},
     )
     db.commit()

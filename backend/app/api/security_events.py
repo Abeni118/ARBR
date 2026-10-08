@@ -12,13 +12,25 @@ from app.models import SecurityEvent
 from app.schemas import Page, SecurityEventCreate, SecurityEventIngestResponse, SecurityEventRead
 from app.services.asset_resolution import resolve_asset
 from app.services.audit import record_phase2_audit
+from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
+from app.services.user_auth import get_current_user
 
-router = APIRouter(prefix="/api/security-events", tags=["security-events"])
-internal_router = APIRouter(prefix="/api/internal/security-events", tags=["internal-security-events"])
+router = APIRouter(prefix="/api/security-events", tags=["security-events"], dependencies=[Depends(get_current_user)])
+security_event_component = require_component_scope(ComponentScope.SECURITY_EVENTS_WRITE)
+internal_router = APIRouter(
+    prefix="/api/internal/security-events",
+    tags=["internal-security-events"],
+    dependencies=[Depends(security_event_component)],
+)
 
 
 @internal_router.post("", response_model=SecurityEventIngestResponse, status_code=status.HTTP_201_CREATED)
-def ingest_security_event(payload: SecurityEventCreate, response: Response, db: Session = Depends(get_db)):
+def ingest_security_event(
+    payload: SecurityEventCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    component: ComponentPrincipal = Depends(security_event_component),
+):
     correlation_id = payload.correlation_id or uuid4()
     existing = (
         db.query(SecurityEvent)
@@ -35,8 +47,8 @@ def ingest_security_event(payload: SecurityEventCreate, response: Response, db: 
             event_id=existing.id,
             asset_id=existing.asset_id,
             correlation_id=existing.correlation_id,
-            actor_id=payload.source,
-            source_component=payload.source_component or payload.source,
+            actor_id=component.component_id,
+            source_component=component.component_id,
             safe_metadata={"source_event_id": payload.source_event_id},
         )
         db.commit()
@@ -61,8 +73,8 @@ def ingest_security_event(payload: SecurityEventCreate, response: Response, db: 
             result_status="rejected",
             resource_type="security_event",
             correlation_id=correlation_id,
-            actor_id=payload.source,
-            source_component=payload.source_component or payload.source,
+            actor_id=component.component_id,
+            source_component=component.component_id,
             reason=exc.detail,
         )
         db.commit()
@@ -79,7 +91,7 @@ def ingest_security_event(payload: SecurityEventCreate, response: Response, db: 
         summary=payload.summary,
         indicators=payload.indicators,
         evidence=payload.evidence,
-        source_component=payload.source_component or payload.source,
+        source_component=component.component_id,
         correlation_id=str(correlation_id),
     )
     db.add(event)
@@ -103,8 +115,8 @@ def ingest_security_event(payload: SecurityEventCreate, response: Response, db: 
             event_id=existing.id,
             asset_id=existing.asset_id,
             correlation_id=existing.correlation_id,
-            actor_id=payload.source,
-            source_component=payload.source_component or payload.source,
+            actor_id=component.component_id,
+            source_component=component.component_id,
             safe_metadata={"source_event_id": payload.source_event_id},
         )
         db.commit()
@@ -120,8 +132,8 @@ def ingest_security_event(payload: SecurityEventCreate, response: Response, db: 
         event_id=event.id,
         asset_id=asset.id,
         correlation_id=correlation_id,
-        actor_id=payload.source,
-        source_component=payload.source_component or payload.source,
+        actor_id=component.component_id,
+        source_component=component.component_id,
         safe_metadata={"source_event_id": payload.source_event_id},
     )
     db.commit()
