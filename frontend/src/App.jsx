@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation, useOutletContext } from 'react-router-dom'
+import { useAuth } from './auth/AuthContext.jsx'
 import { HeaderBar, Sidebar } from './components/DashboardParts.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import SecurityEventsPage from './pages/SecurityEventsPage.jsx'
@@ -10,10 +11,27 @@ import SystemIsolationPage from './pages/SystemIsolationPage.jsx'
 import RecoveryPage from './pages/RecoveryPage.jsx'
 import AuditLogsPage from './pages/AuditLogsPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
+import LoginPage from './pages/LoginPage.jsx'
+import ChangePasswordPage from './pages/ChangePasswordPage.jsx'
 import './App.css'
 
-function App() {
+function RequireAuth() {
+  const { sessionNotice, status, user } = useAuth()
+  if (status === 'loading') return <main className="auth-loading" role="status"><span className="loading-spinner" />Verifying secure session…</main>
+  if (!user) return <Navigate to="/login" replace state={{ sessionNotice }} />
+  return <Outlet />
+}
+
+function LoginGate() {
+  const { status, user } = useAuth()
+  if (status === 'loading') return <main className="auth-loading" role="status"><span className="loading-spinner" />Verifying secure session…</main>
+  if (user) return <Navigate to="/" replace />
+  return <LoginPage />
+}
+
+function DashboardLayout() {
   const location = useLocation()
+  const { logout, user } = useAuth()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [globalSearch, setGlobalSearch] = useState('')
@@ -27,27 +45,45 @@ function App() {
     '/recovery': 'Recovery',
     '/audit-logs': 'Audit Logs',
     '/settings': 'System Settings',
+    '/change-password': 'Change Password',
   }[location.pathname] || 'Dashboard'
 
   return (
     <div className="app-shell">
-      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((current) => !current)} />
+      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((current) => !current)} user={user} onLogout={logout} />
       <div className="main-shell">
         <HeaderBar pageTitle={pageTitle} searchValue={globalSearch} onSearch={setGlobalSearch} notificationOpen={notificationsOpen} onToggleNotifications={() => setNotificationsOpen((current) => !current)} />
-        <Routes>
-          <Route path="/" element={<DashboardPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />} />
-          <Route path="/security-events" element={<SecurityEventsPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />} />
-          <Route path="/threat-detection" element={<ThreatDetectionPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />} />
-          <Route path="/risk-analysis" element={<RiskAnalysisPage globalSearch={globalSearch} />} />
-          <Route path="/backups" element={<BackupsPage globalSearch={globalSearch} />} />
-          <Route path="/system-isolation" element={<SystemIsolationPage globalSearch={globalSearch} />} />
-          <Route path="/recovery" element={<RecoveryPage globalSearch={globalSearch} />} />
-          <Route path="/audit-logs" element={<AuditLogsPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Outlet context={{ globalSearch, setGlobalSearch }} />
       </div>
     </div>
+  )
+}
+
+function PageContent({ component: PageComponent }) {
+  const { globalSearch, setGlobalSearch } = useOutletContext()
+  return <PageComponent globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginGate />} />
+      <Route element={<RequireAuth />}>
+        <Route element={<DashboardLayout />}>
+          <Route index element={<PageContent component={DashboardPage} />} />
+          <Route path="security-events" element={<PageContent component={SecurityEventsPage} />} />
+          <Route path="threat-detection" element={<PageContent component={ThreatDetectionPage} />} />
+          <Route path="risk-analysis" element={<PageContent component={RiskAnalysisPage} />} />
+          <Route path="backups" element={<PageContent component={BackupsPage} />} />
+          <Route path="system-isolation" element={<PageContent component={SystemIsolationPage} />} />
+          <Route path="recovery" element={<PageContent component={RecoveryPage} />} />
+          <Route path="audit-logs" element={<PageContent component={AuditLogsPage} />} />
+          <Route path="settings" element={<PageContent component={SettingsPage} />} />
+          <Route path="change-password" element={<ChangePasswordPage />} />
+        </Route>
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 

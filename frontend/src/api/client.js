@@ -1,27 +1,35 @@
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 const baseUrl = configuredBaseUrl.replace(/\/+$/, '')
 const apiPrefix = baseUrl.endsWith('/api') ? '' : '/api'
-const bearerToken = import.meta.env.VITE_MVP_BEARER_TOKEN?.trim()
+let csrfToken = ''
+
+export function setCsrfToken(value) {
+  csrfToken = typeof value === 'string' ? value : ''
+}
 
 export class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
   }
 }
 
 export async function request(path, { method = 'GET', body, headers = {}, signal } = {}) {
   const requestHeaders = new Headers(headers)
   requestHeaders.set('Accept', 'application/json')
-  if (bearerToken) requestHeaders.set('Authorization', `Bearer ${bearerToken}`)
   if (body !== undefined) requestHeaders.set('Content-Type', 'application/json')
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())) {
+    if (csrfToken) requestHeaders.set('X-CSRF-Token', csrfToken)
+  }
 
   const response = await fetch(`${baseUrl}${apiPrefix}${path.startsWith('/') ? path : `/${path}`}`, {
     method,
     headers: requestHeaders,
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
+    credentials: 'include',
   })
 
   if (response.status === 204) return null
@@ -38,9 +46,21 @@ export async function request(path, { method = 'GET', body, headers = {}, signal
   }
 
   if (!response.ok) {
-    if (response.status === 401) throw new ApiError(401, 'Authentication is required. Configure the development Bearer token and try again.')
-    if (response.status === 403) throw new ApiError(403, 'Permission denied for this operation.')
-    throw new ApiError(response.status, `The API request failed (HTTP ${response.status}).`)
+    const detail = payload?.detail
+    const code = typeof detail === 'object' && detail !== null ? detail.code : null
+    const detailMessage = typeof detail === 'object' && detail !== null ? detail.message : typeof detail === 'string' ? detail : null
+    const message = response.status >= 500
+      ? 'The service encountered an error. Please try again shortly.'
+      : detailMessage || (response.status === 401
+        ? 'Your sign-in is required or has expired. Please sign in again.'
+        : response.status === 403
+          ? 'You do not have permission to perform this operation.'
+          : `The API request failed (HTTP ${response.status}).`)
+    const error = new ApiError(response.status, message, code)
+    if (response.status === 401 && !/^\/auth\/(login|me|logout)$/.test(path) && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('arbr:unauthorized', { detail: error }))
+    }
+    throw error
   }
   return payload
 }

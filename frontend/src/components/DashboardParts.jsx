@@ -5,13 +5,13 @@ import {
   ArrowUpRight,
   Bell,
   ChartNoAxesCombined,
-  ChevronDown,
   ChevronRight,
   CircleHelp,
   Database,
   FileText,
   Fingerprint,
   LayoutDashboard,
+  LogOut,
   LockKeyhole,
   Menu,
   RotateCcw,
@@ -38,8 +38,10 @@ const iconMap = {
   fingerprint: Fingerprint,
 }
 
-export function Sidebar({ collapsed, onToggle }) {
+export function Sidebar({ collapsed, onToggle, user, onLogout }) {
   const location = useLocation()
+  const userLabel = user?.display_name || user?.user_id || 'Signed-in user'
+  const initials = userLabel.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AR'
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <div className="brand">
@@ -61,10 +63,11 @@ export function Sidebar({ collapsed, onToggle }) {
         })}
       </nav>
       <div className="sidebar-user">
-        <div className="user-avatar">AR</div>
-        <div className="user-copy"><strong>API Client</strong><span>MVP Bearer authentication</span></div>
-        <ChevronDown className="user-chevron" size={13} />
+        <div className="user-avatar" aria-hidden="true">{initials}</div>
+        <div className="user-copy"><strong title={userLabel}>{userLabel}</strong><span>{user?.role || 'Authenticated'}</span></div>
+        <button className="logout-button" type="button" onClick={onLogout} aria-label="Sign out" title="Sign out"><LogOut size={14} /></button>
       </div>
+      <Link className="sidebar-password-link" to="/change-password">Change password</Link>
     </aside>
   )
 }

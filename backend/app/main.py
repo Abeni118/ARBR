@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from json import JSONDecodeError, loads
+import os
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request
@@ -28,7 +29,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
