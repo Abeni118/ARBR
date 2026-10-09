@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api import (
     action_requests,
     assets,
+    auth,
     audit_logs,
     backups,
     decisions,
@@ -19,6 +20,7 @@ from app.api import (
 
 api_router = APIRouter()
 for route_module in (
+    auth,
     health,
     dashboard,
     assets,

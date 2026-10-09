@@ -489,6 +489,26 @@ class SystemSettings(UUIDPrimaryKey, TimestampMixin, Base):
     notification_policy: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
 
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    csrf_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class UserPasswordOverride(Base):
+    __tablename__ = "user_password_overrides"
+
+    user_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 def _reject_audit_mutation(_mapper, _connection, _target) -> None:
     raise ValueError("Audit events are append-only and cannot be updated or deleted")
 

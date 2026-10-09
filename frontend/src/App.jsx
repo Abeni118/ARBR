@@ -1,24 +1,8 @@
-import { useMemo, useState } from 'react'
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { Check, X } from 'lucide-react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { metrics, riskTrend, securityEvents } from './data/dashboardData.js'
-import {
-  ActionPanel,
-  DashboardToolbar,
-  EventsTable,
-  HeaderBar,
-  MetricCard,
-  Sidebar,
-} from './components/DashboardParts.jsx'
+import { useState } from 'react'
+import { Navigate, Outlet, Route, Routes, useLocation, useOutletContext } from 'react-router-dom'
+import { useAuth } from './auth/AuthContext.jsx'
+import { HeaderBar, Sidebar } from './components/DashboardParts.jsx'
+import DashboardPage from './pages/DashboardPage.jsx'
 import SecurityEventsPage from './pages/SecurityEventsPage.jsx'
 import ThreatDetectionPage from './pages/ThreatDetectionPage.jsx'
 import RiskAnalysisPage from './pages/RiskAnalysisPage.jsx'
@@ -27,131 +11,79 @@ import SystemIsolationPage from './pages/SystemIsolationPage.jsx'
 import RecoveryPage from './pages/RecoveryPage.jsx'
 import AuditLogsPage from './pages/AuditLogsPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
+import LoginPage from './pages/LoginPage.jsx'
+import ChangePasswordPage from './pages/ChangePasswordPage.jsx'
 import './App.css'
 
-function RiskTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="chart-tooltip">
-      <strong>{label}</strong>
-      <span><i className="legend-dot legend-dot--risk" /> Risk level: {payload[0]?.value}</span>
-      <span><i className="legend-dot legend-dot--threat" /> Threat count: {payload[1]?.value}</span>
-    </div>
-  )
+function RequireAuth() {
+  const { sessionNotice, status, user } = useAuth()
+  if (status === 'loading') return <main className="auth-loading" role="status"><span className="loading-spinner" />Verifying secure session…</main>
+  if (!user) return <Navigate to="/login" replace state={{ sessionNotice }} />
+  return <Outlet />
 }
 
-function RiskTrendChart() {
-  return (
-    <section className="panel chart-panel" aria-labelledby="risk-heading">
-      <div className="chart-heading">
-        <div><h2 id="risk-heading">Risk Overview &amp; Threat Trend</h2><p>Aggregate system risk score against active detected anomalies</p></div>
-        <div className="chart-legend"><span><i className="legend-dot legend-dot--risk" />Risk Level</span><span><i className="legend-dot legend-dot--threat" />Threat Count</span></div>
-      </div>
-      <div className="chart-area">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={riskTrend} margin={{ top: 9, right: 2, bottom: 0, left: -12 }}>
-            <CartesianGrid vertical={false} stroke="#30343d" strokeDasharray="2 5" />
-            <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#9298a4', fontSize: 9, fontFamily: 'ui-monospace, monospace' }} dy={8} />
-            <YAxis domain={[0, 80]} ticks={[0, 20, 40, 60, 80]} axisLine={false} tickLine={false} tick={{ fill: '#9298a4', fontSize: 9, fontFamily: 'ui-monospace, monospace' }} />
-            <Tooltip content={<RiskTooltip />} cursor={{ stroke: '#59606d', strokeDasharray: '3 4' }} />
-            <Line type="monotone" dataKey="risk" stroke="#09c7d8" strokeWidth={1.6} dot={false} activeDot={{ r: 3, fill: '#09c7d8', stroke: '#101a34', strokeWidth: 2 }} />
-            <Line type="monotone" dataKey="threats" stroke="#f03c4b" strokeWidth={1.5} dot={false} activeDot={{ r: 3, fill: '#f03c4b', stroke: '#101a34', strokeWidth: 2 }} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </section>
-  )
+function LoginGate() {
+  const { status, user } = useAuth()
+  if (status === 'loading') return <main className="auth-loading" role="status"><span className="loading-spinner" />Verifying secure session…</main>
+  if (user) return <Navigate to="/" replace />
+  return <LoginPage />
 }
 
-function StatusFooter() {
-  return (
-    <footer className="status-footer">
-      <div className="system-indicators">
-        <span><i className="status-dot status-dot--green" />API Connectivity: Stable</span>
-        <span><i className="status-dot status-dot--green" />Threat Database: v4.2.6 (Synced)</span>
-        <span><i className="status-dot status-dot--cyan" />Latency: 14ms</span>
-      </div>
-      <span className="uptime">System Uptime: 120d 14h 28m 11s</span>
-    </footer>
-  )
-}
-
-function DashboardPage({ globalSearch, onGlobalSearchChange }) {
-  const [period, setPeriod] = useState('24H')
-  const [filterOpen, setFilterOpen] = useState(false)
-  const [actionState, setActionState] = useState('')
-
-  const filteredEvents = useMemo(() => {
-    const normalizedQuery = globalSearch.trim().toLowerCase()
-    if (!normalizedQuery) return securityEvents
-    return securityEvents.filter((event) => Object.values(event).some((value) => String(value).toLowerCase().includes(normalizedQuery)))
-  }, [globalSearch])
-
-  const exportEvents = () => {
-    const headers = ['Event ID', 'Timestamp', 'Source IP/Host', 'Event Category', 'Severity', 'Status']
-    const rows = filteredEvents.map((event) => [event.id, event.time, event.source, event.category, event.severity, event.status])
-    const csv = [headers, ...rows].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n')
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'security-events.csv'
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  return (
-    <main className="dashboard-main">
-      <section className="overview-heading">
-        <div className="overview-title"><h1>Operational Overview</h1><p>SOC Command Center | Security Node: Alpha-01</p></div>
-        <DashboardToolbar period={period} onPeriodChange={setPeriod} filterOpen={filterOpen} onFilter={() => setFilterOpen((current) => !current)} onExport={exportEvents} />
-      </section>
-      <section className="metric-grid" aria-label="System security metrics">
-        {metrics.map((metric) => <MetricCard key={metric.label} metric={metric} />)}
-      </section>
-      <div className="dashboard-grid"><RiskTrendChart /><ActionPanel actionState={actionState} onAction={setActionState} /></div>
-      <EventsTable events={filteredEvents} onViewAll={() => onGlobalSearchChange('')} />
-      <StatusFooter />
-      {actionState && <div className="action-toast" role="status"><Check size={14} /> {actionState === 'isolate' ? 'System isolation protocol initiated' : actionState === 'snapshot' ? 'Immutable snapshot deployment started' : 'Point-in-time recovery verified'}</div>}
-    </main>
-  )
-}
-
-function App() {
+function DashboardLayout() {
   const location = useLocation()
+  const { logout, user } = useAuth()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [toast, setToast] = useState('')
   const [globalSearch, setGlobalSearch] = useState('')
-  const isSecurityEventsPage = location.pathname === '/security-events'
-  const isThreatDetectionPage = location.pathname === '/threat-detection'
-  const isRiskAnalysisPage = location.pathname === '/risk-analysis'
-  const isBackupsPage = location.pathname === '/backups'
-  const isSystemIsolationPage = location.pathname === '/system-isolation'
-  const isRecoveryPage = location.pathname === '/recovery'
-  const isAuditLogsPage = location.pathname === '/audit-logs'
-  const isSettingsPage = location.pathname === '/settings'
-  const pageTitle = isSecurityEventsPage ? 'Security Events' : isThreatDetectionPage ? 'Threat Detection' : isRiskAnalysisPage ? 'Risk Analysis' : isBackupsPage ? 'Backups' : isSystemIsolationPage ? 'System Isolation' : isRecoveryPage ? 'Recovery' : isAuditLogsPage ? 'Audit Logs' : isSettingsPage ? 'System Settings' : 'Dashboard'
+  const pageTitle = {
+    '/': 'Dashboard',
+    '/security-events': 'Security Events',
+    '/threat-detection': 'Threat Detection',
+    '/risk-analysis': 'Risk Analysis',
+    '/backups': 'Backups',
+    '/system-isolation': 'System Isolation',
+    '/recovery': 'Recovery',
+    '/audit-logs': 'Audit Logs',
+    '/settings': 'System Settings',
+    '/change-password': 'Change Password',
+  }[location.pathname] || 'Dashboard'
 
   return (
     <div className="app-shell">
-      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((current) => !current)} />
+      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((current) => !current)} user={user} onLogout={logout} />
       <div className="main-shell">
         <HeaderBar pageTitle={pageTitle} searchValue={globalSearch} onSearch={setGlobalSearch} notificationOpen={notificationsOpen} onToggleNotifications={() => setNotificationsOpen((current) => !current)} />
-        <Routes>
-          <Route path="/" element={<DashboardPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />} />
-          <Route path="/security-events" element={<SecurityEventsPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
-          <Route path="/threat-detection" element={<ThreatDetectionPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
-          <Route path="/risk-analysis" element={<RiskAnalysisPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
-          <Route path="/backups" element={<BackupsPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
-          <Route path="/system-isolation" element={<SystemIsolationPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
-          <Route path="/recovery" element={<RecoveryPage globalSearch={globalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
-          <Route path="/audit-logs" element={<AuditLogsPage globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
-          <Route path="/settings" element={<SettingsPage onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 4500) }} />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-        {toast && <div className="action-toast" role="status"><Check size={14} />{toast}<button aria-label="Dismiss notification" onClick={() => setToast('')}><X size={13} /></button></div>}
+        <Outlet context={{ globalSearch, setGlobalSearch }} />
       </div>
     </div>
+  )
+}
+
+function PageContent({ component: PageComponent }) {
+  const { globalSearch, setGlobalSearch } = useOutletContext()
+  return <PageComponent globalSearch={globalSearch} onGlobalSearchChange={setGlobalSearch} />
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginGate />} />
+      <Route element={<RequireAuth />}>
+        <Route element={<DashboardLayout />}>
+          <Route index element={<PageContent component={DashboardPage} />} />
+          <Route path="security-events" element={<PageContent component={SecurityEventsPage} />} />
+          <Route path="threat-detection" element={<PageContent component={ThreatDetectionPage} />} />
+          <Route path="risk-analysis" element={<PageContent component={RiskAnalysisPage} />} />
+          <Route path="backups" element={<PageContent component={BackupsPage} />} />
+          <Route path="system-isolation" element={<PageContent component={SystemIsolationPage} />} />
+          <Route path="recovery" element={<PageContent component={RecoveryPage} />} />
+          <Route path="audit-logs" element={<PageContent component={AuditLogsPage} />} />
+          <Route path="settings" element={<PageContent component={SettingsPage} />} />
+          <Route path="change-password" element={<ChangePasswordPage />} />
+        </Route>
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 

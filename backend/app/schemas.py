@@ -91,6 +91,27 @@ class APIModel(BaseModel):
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
 
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=12, max_length=1024)
+
+
+class AuthenticatedUser(APIModel):
+    user_id: str
+    role: str
+    display_name: str | None = None
+    csrf_token: str
+
+
 class RiskThresholds(APIModel):
     low_min: int = Field(ge=0, le=100)
     low_max: int = Field(ge=0, le=100)
