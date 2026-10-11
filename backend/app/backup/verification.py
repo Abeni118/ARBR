@@ -191,3 +191,10 @@ def apply_result_to_recovery_point(
     Does NOT mutate the original object (functional style).
     """
     return replace(recovery_point, integrity_status=result.status)
+
+from .integrity import verify_backup_integrity  # noqa: E402
+
+
+def is_backup_safe_for_recovery(file_path, stored_hash) -> bool:
+    """Used by routes.py: True if the backup at file_path matches stored_hash."""
+    return verify_backup_integrity(file_path, stored_hash)
