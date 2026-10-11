@@ -1,3 +1,23 @@
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+.env
+.env.*
+!.env.example
+
+*.log
+
+.vscode/
+.idea/
+
+backup/data/
+backup/storage/
+backup/test-data/
 # Python
 __pycache__/
 *.py[cod]
@@ -21,3 +41,4 @@ dist/
 
 # OS
 .DS_Store
+

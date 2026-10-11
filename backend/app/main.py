@@ -20,6 +20,7 @@ async def lifespan(_app: FastAPI):
     initialize_database()
     yield
 
+from app.backup.routes import router as backup_router
 
 app = FastAPI(
     title="Attack-Resistant Backup & Recovery API",
@@ -134,6 +135,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     ]
     return JSONResponse(status_code=422, content={"detail": safe_errors})
 
+app.include_router(backup_router)
 
 @app.get("/")
 def root():
