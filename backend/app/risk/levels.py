@@ -1,4 +1,4 @@
-from .enums import RiskLevel
+from app.enums import RiskLevel
 
 DEFAULT_RISK_THRESHOLDS = {
     "low_min": 0,

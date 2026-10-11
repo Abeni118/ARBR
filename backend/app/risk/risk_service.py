@@ -1,4 +1,4 @@
-from backend.app.risk.risk_engine import RiskAssessment, RiskEngine, RiskEvent
+from app.risk.risk_engine import RiskAssessment, RiskEngine, RiskEvent
 
 
 class RiskService:

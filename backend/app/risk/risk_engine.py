@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from backend.app.risk.risk_rules import RISK_RULES
+from app.risk.risk_rules import RISK_RULES
 
 
 @dataclass(frozen=True)
