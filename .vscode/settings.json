@@ -1,0 +1,7 @@
+{
+    "python.analysis.extraPaths": [
+        "./isolation/scripts",
+        "./recovery/scripts"
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
+}
