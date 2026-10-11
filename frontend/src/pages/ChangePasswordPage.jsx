@@ -25,9 +25,17 @@ export default function ChangePasswordPage() {
       setError('The new password and confirmation do not match.')
       return
     }
+    if (newPassword === currentPassword) {
+      setError('Choose a new password that is different from your current password.')
+      return
+    }
+    if (!window.confirm('Change your password and sign out of all active sessions?')) return
     setBusy(true)
     try {
       await changePassword({ current_password: currentPassword, new_password: newPassword })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
       navigate('/login', { replace: true })
     } catch (changeError) {
       setError(changeError.message || 'Password could not be changed. Please try again.')
