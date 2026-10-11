@@ -10,9 +10,17 @@ import BackupsPage from './pages/BackupsPage.jsx'
 import SystemIsolationPage from './pages/SystemIsolationPage.jsx'
 import RecoveryPage from './pages/RecoveryPage.jsx'
 import AuditLogsPage from './pages/AuditLogsPage.jsx'
-import SettingsPage from './pages/SettingsPage.jsx'
+import {
+  SettingsAuditMonitoringPage,
+  SettingsGeneralPage,
+  SettingsLayout,
+  SettingsNotificationsPage,
+  SettingsSecurityAccessPage,
+  SettingsSystemIntegrationsPage,
+} from './pages/SettingsPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import ChangePasswordPage from './pages/ChangePasswordPage.jsx'
+import ProfilePage from './pages/ProfilePage.jsx'
 import './App.css'
 
 function RequireAuth() {
@@ -44,7 +52,13 @@ function DashboardLayout() {
     '/system-isolation': 'System Isolation',
     '/recovery': 'Recovery',
     '/audit-logs': 'Audit Logs',
-    '/settings': 'System Settings',
+    '/settings': 'Settings',
+    '/settings/general': 'General Settings',
+    '/settings/security-access': 'Security & Access',
+    '/settings/notifications': 'Notifications',
+    '/settings/system-integrations': 'System & Integrations',
+    '/settings/audit-monitoring': 'Audit & Monitoring',
+    '/profile': 'Profile',
     '/change-password': 'Change Password',
   }[location.pathname] || 'Dashboard'
 
@@ -78,7 +92,15 @@ function App() {
           <Route path="system-isolation" element={<PageContent component={SystemIsolationPage} />} />
           <Route path="recovery" element={<PageContent component={RecoveryPage} />} />
           <Route path="audit-logs" element={<PageContent component={AuditLogsPage} />} />
-          <Route path="settings" element={<PageContent component={SettingsPage} />} />
+          <Route path="settings" element={<SettingsLayout />}>
+            <Route index element={<Navigate to="general" replace />} />
+            <Route path="general" element={<SettingsGeneralPage />} />
+            <Route path="security-access" element={<SettingsSecurityAccessPage />} />
+            <Route path="notifications" element={<SettingsNotificationsPage />} />
+            <Route path="system-integrations" element={<SettingsSystemIntegrationsPage />} />
+            <Route path="audit-monitoring" element={<SettingsAuditMonitoringPage />} />
+          </Route>
+          <Route path="profile" element={<PageContent component={ProfilePage} />} />
           <Route path="change-password" element={<ChangePasswordPage />} />
         </Route>
       </Route>

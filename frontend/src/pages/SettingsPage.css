@@ -1,20 +1,9 @@
 .settings-main { width: 100%; max-width: 1600px; min-width: 0; flex: 1; margin: 0 auto; display: flex; flex-direction: column; }
-.settings-nav-panel { display: flex; align-items: center; gap: 4px; padding: 6px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; }
-.settings-nav-item { position: relative; flex: 0 0 auto; padding: 9px 12px; border: 1px solid transparent; border-radius: 6px; color: #aeb8c7; text-decoration: none; text-transform: capitalize; font-size: 12px; font-weight: 550; line-height: 1.3; white-space: nowrap; transition: color 140ms ease, background 140ms ease, border-color 140ms ease; }
-.settings-nav-item:hover { color: #edf1f8; background: #1b2944; }
-.settings-nav-item:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-.settings-nav-item--active { border-color: #087e91; color: #eaf8fa; background: #14303b; }
-.settings-record-meta { min-height: 76px; padding: 16px 20px; display: flex; align-items: center; gap: 18px; }
-.settings-record-meta > div { display: grid; gap: 3px; }
-.settings-record-meta > div strong { color: #edf1f8; font-size: 14px; font-weight: 650; }
-.settings-record-meta > span:not(.settings-readonly-badge) { color: #aeb8c7; font-size: 12px; }
-.settings-readonly-badge { margin-left: auto; padding: 5px 9px; border: 1px solid #167e8c; border-radius: 999px; color: #35d0dc; background: #08c8dd12; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
 .settings-sections-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; }
 .settings-card { overflow: hidden; scroll-margin-top: 18px; }
-.settings-card-heading { min-height: 78px; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); }
+.settings-card-heading { min-height: 78px; padding: 16px 20px; display: flex; align-items: center; justify-content: flex-start; gap: 13px; border-bottom: 1px solid var(--border); }
 .settings-card-heading > div { min-width: 0; display: grid; gap: 5px; }
 .settings-card-heading h2 { margin: 0; color: #edf1f8; font-size: 16px; font-weight: 650; line-height: 1.3; text-transform: capitalize; }
-.settings-card-count { flex: 0 0 auto; padding: 4px 8px; border: 1px solid #384253; border-radius: 999px; color: #aeb8c7; font-size: 11px; white-space: nowrap; }
 .settings-values { margin: 0; padding: 4px 20px 10px; }
 .settings-value-row { min-height: 52px; padding: 11px 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, .85fr); align-items: center; gap: 20px; border-bottom: 1px solid #303644; }
 .settings-value-row:last-child { border-bottom: 0; }
@@ -28,10 +17,6 @@
 }
 
 @media (max-width: 700px) {
-  .settings-nav-panel { margin-inline: -2px; }
-  .settings-nav-item { padding: 8px 10px; font-size: 12px; }
-  .settings-record-meta { min-height: 0; padding: 14px; flex-wrap: wrap; gap: 8px 14px; }
-  .settings-readonly-badge { margin-left: auto; }
   .settings-card-heading { min-height: 68px; padding: 14px; }
   .settings-card-heading h2 { font-size: 15px; }
   .settings-values { padding: 2px 14px 8px; }

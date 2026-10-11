@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api, queryString } from './client.js'
 import { displayValue, formatBytes, formatTimestamp, statusClass } from './formatters.js'
@@ -12,9 +11,6 @@ import '../pages/BackupsPage.css'
 import '../pages/SystemIsolationPage.css'
 import '../pages/RecoveryPage.css'
 import '../pages/AuditLogsPage.css'
-import '../pages/SettingsPage.css'
-const settingsSections = ['risk_thresholds', 'isolation_policy', 'backup_policy', 'recovery_policy', 'notification_policy']
-
 function useApiResource(path, refreshKey = 0) {
   const requestKey = `${refreshKey}:${path || ''}`
   const [state, setState] = useState({ requestKey: '', data: null, loading: false, error: null })
@@ -31,7 +27,6 @@ function useApiResource(path, refreshKey = 0) {
   if (!path) return { data: null, loading: false, error: null }
   return state.requestKey === requestKey ? state : { data: null, loading: true, error: null }
 }
-
 function PageHeading({ title, description, actions }) {
   return <section className="api-page-heading"><div><h1>{title}</h1><p>{description}</p></div>{actions && <div className="api-page-actions">{actions}</div>}</section>
 }
@@ -407,67 +402,13 @@ export function AuditLogsPage({ globalSearch = '', onGlobalSearchChange }) {
   const { data, loading, error } = useApiResource(path)
   const items = (data?.items || []).filter((event) => !globalSearch.trim() || [event.id, event.actor_type, event.actor_id, event.action, event.result_status, event.resource_type, event.resource_id, event.correlation_id].some((value) => String(value || '').toLowerCase().includes(globalSearch.trim().toLowerCase())))
   const updateFilter = (key, value) => { setFilters((current) => ({ ...current, [key]: value })); setPage(1) }
-  return <main className="audit-logs-main"><PageHeading title="Audit Logs" description="Append-oriented audit records using fields exposed by the API." />
+  return (
+    <main className="audit-logs-main"><PageHeading title="Audit Logs" description="Append-oriented audit records using fields exposed by the API." />
     <section className="audit-summary-grid"><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Total matching records</span><strong>{data?.total ?? '—'}</strong><span>Backend pagination total</span></div></article><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Severity</span><strong>Not provided</strong><span>No severity in the audit schema</span></div></article><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Actor details</span><strong>API fields only</strong><span>actor_type and actor_id</span></div></article></section>
     <section className="panel audit-log-panel"><header className="audit-section-heading"><div><h2>Audit Log</h2><p>Correlation IDs are preserved where present.</p></div></header><div className="audit-filter-bar"><label className="event-search"><input type="search" value={globalSearch} onChange={(event) => { onGlobalSearchChange?.(event.target.value); setPage(1) }} placeholder="Search loaded audit fields" /></label><div className="event-select-filters"><label className="event-select"><input value={filters.actor_type} onChange={(event) => updateFilter('actor_type', event.target.value)} placeholder="Exact actor type" /></label><label className="event-select"><input value={filters.action} onChange={(event) => updateFilter('action', event.target.value)} placeholder="Action contains" /></label><label className="event-select"><input value={filters.result_status} onChange={(event) => updateFilter('result_status', event.target.value)} placeholder="Exact result status" /></label><label className="event-select"><input value={filters.correlation_id} onChange={(event) => updateFilter('correlation_id', event.target.value)} placeholder="Correlation ID" /></label></div></div>
       <ApiState loading={loading} error={error} empty={!loading && !error && items.length === 0 ? 'No audit events match the current search and filters.' : null}>{items.length > 0 && <><ApiTable headings={['Occurred At', 'Event ID', 'Actor Type', 'Actor ID', 'Action', 'Result Status', 'Resource', 'Correlation ID', 'Details']} className="audit-table-scroll">{items.map((event) => <tr key={event.id}><td>{formatTimestamp(event.occurred_at)}</td><td>{event.id}</td><td>{event.actor_type}</td><td>{displayValue(event.actor_id)}</td><td>{event.action}</td><td>{event.result_status}</td><td>{displayValue(event.resource_type)} · {displayValue(event.resource_id)}</td><td>{event.correlation_id}</td><td><button className="row-action" onClick={() => setSelectedId(event.id)}>View</button></td></tr>)}</ApiTable><div className="event-pagination"><span>Page {data.page} · {data.total} events</span><button disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button><button disabled={page * data.page_size >= data.total} onClick={() => setPage(page + 1)}>Next</button></div></>}</ApiState>
     </section>{selectedId && <AuditDetails eventId={selectedId} onClose={() => setSelectedId(null)} />}
-  </main>
-}
-
-export function SettingsPage() {
-  const location = useLocation()
-  const [activeSection, setActiveSection] = useState(() => location.hash.slice(1) || settingsSections[0])
-  const { data, loading, error } = useApiResource('/settings')
-  useEffect(() => {
-    const syncSection = () => setActiveSection(window.location.hash.slice(1) || settingsSections[0])
-    window.addEventListener('hashchange', syncSection)
-    return () => window.removeEventListener('hashchange', syncSection)
-  }, [])
-  return (
-    <main className="settings-main">
-      <PageHeading title="System Settings" description="Read-only settings returned by the backend." />
-      <nav className="panel settings-nav-panel" aria-label="Settings sections">
-          {settingsSections.map((section) => (
-            <a
-              className={`settings-nav-item ${activeSection === section ? 'settings-nav-item--active' : ''}`}
-              key={section}
-              href={`#${section}`}
-              aria-current={activeSection === section ? 'location' : undefined}
-            >
-              {section.replaceAll('_', ' ')}
-            </a>
-          ))}
-      </nav>
-      <ApiState loading={loading} error={error} empty={!loading && !error && !data ? 'No settings response was returned.' : null}>
-        {data && <>
-          <div className="panel settings-record-meta">
-            <div><span className="eyebrow">Configuration record</span><strong>Version {data.version}</strong></div>
-            <span>Updated {formatTimestamp(data.updated_at)}</span>
-            <span className="settings-readonly-badge">Read only</span>
-          </div>
-          <div className="settings-sections-grid">
-            {settingsSections.map((section) => (
-              <section className="panel settings-card" id={section} key={section} aria-labelledby={`${section}-heading`}>
-                <header className="settings-card-heading">
-                  <div><span className="eyebrow">Policy</span><h2 id={`${section}-heading`}>{section.replaceAll('_', ' ')}</h2></div>
-                  <span className="settings-card-count">{Object.keys(data[section] || {}).length} fields</span>
-                </header>
-                <dl className="settings-values">
-                  {Object.entries(data[section] || {}).map(([key, value]) => (
-                    <div className="settings-value-row" key={key}>
-                      <dt>{key.replaceAll('_', ' ')}</dt>
-                      <dd>{displayValue(value)}</dd>
-                    </div>
-                  ))}
-                  {Object.keys(data[section] || {}).length === 0 && <p className="settings-section-empty">No policy values were returned.</p>}
-                </dl>
-              </section>
-            ))}
-          </div>
-          <p className="api-note settings-api-note">Settings are shown exactly as returned by the API. Editing is not supported by this read-only endpoint.</p>
-        </>}
-      </ApiState>
     </main>
   )
 }
+

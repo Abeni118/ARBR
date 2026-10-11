@@ -51,6 +51,7 @@ export function Sidebar({ collapsed, onToggle, user, onLogout }) {
     'System Isolation': '/system-isolation',
     'Audit Logs': '/audit-logs',
     Settings: '/settings',
+    Profile: '/profile',
   }
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
@@ -72,11 +73,13 @@ export function Sidebar({ collapsed, onToggle, user, onLogout }) {
         })}
       </nav>
       <div className="sidebar-user">
-        <div className="user-avatar" aria-hidden="true">{initials}</div>
-        <div className="user-copy"><strong title={userLabel}>{userLabel}</strong><span>{user?.role || 'Authenticated'}</span></div>
-        <button className="logout-button" type="button" onClick={onLogout} aria-label="Sign out" title="Sign out"><LogOut size={14} /></button>
+        <Link className="sidebar-profile-link" to={paths.Profile} aria-label="View profile" title="Profile">
+          <div className="user-avatar" aria-hidden="true">{initials}</div>
+          <div className="user-copy"><strong title={userLabel}>{userLabel}</strong><span>{user?.role || 'Authenticated'}</span></div>
+        </Link>
+        <button className="logout-button" type="button" onClick={() => { if (window.confirm('Sign out of this account on this browser?')) onLogout() }} aria-label="Sign out" title="Sign out"><LogOut size={14} /></button>
       </div>
-      <Link className="sidebar-password-link" to="/change-password">Change password</Link>
+      <Link className="sidebar-password-link" to="/profile">Profile &amp; password</Link>
     </aside>
   )
 }
