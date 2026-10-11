@@ -1,3 +1,4 @@
+
 .venv/
 __pycache__/
 *.py[cod]
@@ -17,3 +18,25 @@ htmlcov/
 backup/data/
 backup/storage/
 backup/test-data/
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+.venv/
+
+# Environment variables
+.env
+
+# Node
+node_modules/
+dist/
+
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+
