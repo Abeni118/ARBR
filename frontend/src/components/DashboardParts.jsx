@@ -20,7 +20,7 @@ import {
   Shield,
   ShieldCheck,
 } from 'lucide-react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import { navigationItems } from '../data/dashboardData.js'
 
 const iconMap = {
@@ -39,9 +39,19 @@ const iconMap = {
 }
 
 export function Sidebar({ collapsed, onToggle, user, onLogout }) {
-  const location = useLocation()
   const userLabel = user?.display_name || user?.user_id || 'Signed-in user'
   const initials = userLabel.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AR'
+  const paths = {
+    Dashboard: '/',
+    'Security Events': '/security-events',
+    'Threat Detection': '/threat-detection',
+    'Risk Analysis': '/risk-analysis',
+    Backups: '/backups',
+    Recovery: '/recovery',
+    'System Isolation': '/system-isolation',
+    'Audit Logs': '/audit-logs',
+    Settings: '/settings',
+  }
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <div className="brand">
@@ -54,12 +64,11 @@ export function Sidebar({ collapsed, onToggle, user, onLogout }) {
       <nav className="side-nav" aria-label="Main navigation">
         {navigationItems.map(({ label, icon }) => {
           const Icon = iconMap[icon]
-          const path = label === 'Dashboard' ? '/' : label === 'Security Events' ? '/security-events' : label === 'Threat Detection' ? '/threat-detection' : label === 'Risk Analysis' ? '/risk-analysis' : label === 'Backups' ? '/backups' : label === 'Recovery' ? '/recovery' : label === 'System Isolation' ? '/system-isolation' : label === 'Audit Logs' ? '/audit-logs' : label === 'Settings' ? '/settings' : null
-          const active = path === '/' ? location.pathname === '/' : path === location.pathname
-          const contents = <><Icon size={14} strokeWidth={1.8} /><span>{label}</span>{active && <ChevronRight className="nav-chevron" size={12} />}</>
+          const path = paths[label]
+          const contents = (active) => <><Icon size={14} strokeWidth={1.8} /><span>{label}</span>{active && <ChevronRight className="nav-chevron" size={12} />}</>
           return path
-            ? <Link className={`nav-link ${active ? 'nav-link--active' : ''}`} key={label} to={path} aria-label={label} title={label} aria-current={active ? 'page' : undefined}>{contents}</Link>
-            : <button className="nav-link" key={label} type="button" aria-label={label} title={label}>{contents}</button>
+            ? <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} key={label} to={path} end={path === '/'} aria-label={label} title={label}>{({ isActive }) => contents(isActive)}</NavLink>
+            : <button className="nav-link" key={label} type="button" aria-label={label} title={label}>{contents(false)}</button>
         })}
       </nav>
       <div className="sidebar-user">

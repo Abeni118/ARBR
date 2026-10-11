@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api, queryString } from './client.js'
 import { displayValue, formatBytes, formatTimestamp, statusClass } from './formatters.js'
@@ -12,6 +13,7 @@ import '../pages/SystemIsolationPage.css'
 import '../pages/RecoveryPage.css'
 import '../pages/AuditLogsPage.css'
 import '../pages/SettingsPage.css'
+const settingsSections = ['risk_thresholds', 'isolation_policy', 'backup_policy', 'recovery_policy', 'notification_policy']
 
 function useApiResource(path, refreshKey = 0) {
   const requestKey = `${refreshKey}:${path || ''}`
@@ -414,14 +416,58 @@ export function AuditLogsPage({ globalSearch = '', onGlobalSearchChange }) {
 }
 
 export function SettingsPage() {
+  const location = useLocation()
+  const [activeSection, setActiveSection] = useState(() => location.hash.slice(1) || settingsSections[0])
   const { data, loading, error } = useApiResource('/settings')
-  const sections = ['risk_thresholds', 'isolation_policy', 'backup_policy', 'recovery_policy', 'notification_policy']
-  return <main className="settings-main"><PageHeading title="System Settings" description="Read-only settings returned by the backend." />
-    <section className="settings-workspace"><nav className="panel settings-nav-panel" aria-label="Settings sections">{sections.map((section) => <a className="settings-nav-item" key={section} href={`#${section}`}>{section.replaceAll('_', ' ')}</a>)}</nav>
-      <section className="panel settings-form-panel"><header className="settings-section-heading"><div><span className="eyebrow">Configuration record</span><h2>Current Settings</h2><p>Editing and persistence are not supported by the settings API.</p></div><span className="settings-mock-badge">READ ONLY</span></header>
-        <ApiState loading={loading} error={error} empty={!loading && !error && !data ? 'No settings response was returned.' : null}>{data && <><p className="api-note">Settings ID: {data.id} · Version: {data.version} · Updated: {formatTimestamp(data.updated_at)}</p>{sections.map((section) => <section className="settings-readonly-section" id={section} key={section}><h3>{section.replaceAll('_', ' ')}</h3><dl>{Object.entries(data[section] || {}).map(([key, value]) => <div className="setting-row" key={key}><dt>{key.replaceAll('_', ' ')}</dt><dd>{displayValue(value)}</dd></div>)}{Object.keys(data[section] || {}).length === 0 && <p>Empty policy object returned by the API.</p>}</dl></section>)}</>}</ApiState>
-      </section>
-    </section>
-    <p className="api-note">GET /api/settings is the only settings endpoint. No local save or demo configuration controls are available.</p>
-  </main>
+  useEffect(() => {
+    const syncSection = () => setActiveSection(window.location.hash.slice(1) || settingsSections[0])
+    window.addEventListener('hashchange', syncSection)
+    return () => window.removeEventListener('hashchange', syncSection)
+  }, [])
+  return (
+    <main className="settings-main">
+      <PageHeading title="System Settings" description="Read-only settings returned by the backend." />
+      <nav className="panel settings-nav-panel" aria-label="Settings sections">
+          {settingsSections.map((section) => (
+            <a
+              className={`settings-nav-item ${activeSection === section ? 'settings-nav-item--active' : ''}`}
+              key={section}
+              href={`#${section}`}
+              aria-current={activeSection === section ? 'location' : undefined}
+            >
+              {section.replaceAll('_', ' ')}
+            </a>
+          ))}
+      </nav>
+      <ApiState loading={loading} error={error} empty={!loading && !error && !data ? 'No settings response was returned.' : null}>
+        {data && <>
+          <div className="panel settings-record-meta">
+            <div><span className="eyebrow">Configuration record</span><strong>Version {data.version}</strong></div>
+            <span>Updated {formatTimestamp(data.updated_at)}</span>
+            <span className="settings-readonly-badge">Read only</span>
+          </div>
+          <div className="settings-sections-grid">
+            {settingsSections.map((section) => (
+              <section className="panel settings-card" id={section} key={section} aria-labelledby={`${section}-heading`}>
+                <header className="settings-card-heading">
+                  <div><span className="eyebrow">Policy</span><h2 id={`${section}-heading`}>{section.replaceAll('_', ' ')}</h2></div>
+                  <span className="settings-card-count">{Object.keys(data[section] || {}).length} fields</span>
+                </header>
+                <dl className="settings-values">
+                  {Object.entries(data[section] || {}).map(([key, value]) => (
+                    <div className="settings-value-row" key={key}>
+                      <dt>{key.replaceAll('_', ' ')}</dt>
+                      <dd>{displayValue(value)}</dd>
+                    </div>
+                  ))}
+                  {Object.keys(data[section] || {}).length === 0 && <p className="settings-section-empty">No policy values were returned.</p>}
+                </dl>
+              </section>
+            ))}
+          </div>
+          <p className="api-note settings-api-note">Settings are shown exactly as returned by the API. Editing is not supported by this read-only endpoint.</p>
+        </>}
+      </ApiState>
+    </main>
+  )
 }
