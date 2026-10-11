@@ -15,8 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import logging
 
-from backend.app.backup.integrity import calculate_directory_sha256
-from backend.app.backup.recovery_point import RecoveryPoint
+from .integrity import calculate_directory_sha256
+from .recovery_point import RecoveryPoint
 
 
 logger = logging.getLogger(__name__)

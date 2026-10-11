@@ -1,3 +1,4 @@
+from app.backup.routes import router as backup_router
 from fastapi import FastAPI
 
 app = FastAPI(
@@ -5,7 +6,7 @@ app = FastAPI(
     description="Backend API for the cyber resilience system",
     version="1.0.0"
 )
-
+app.include_router(backup_router)
 
 @app.get("/")
 def root():

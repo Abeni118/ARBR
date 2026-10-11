@@ -133,3 +133,22 @@ def calculate_directory_sha256(directory_path: str | Path) -> str:
         master.update(b"\0")
 
     return master.hexdigest()
+import os
+
+def calculate_directory_sha256(dir_path: str) -> str:
+    """Calculates the SHA-256 hash of an entire directory."""
+    sha256_hash = hashlib.sha256()
+    if not os.path.exists(dir_path):
+        raise FileNotFoundError(f"Directory not found: {dir_path}")
+        
+    # Walk through all files in the directory and hash their contents
+    for root, dirs, files in os.walk(dir_path):
+        dirs.sort()
+        for file in sorted(files):
+            file_path = os.path.join(root, file)
+            sha256_hash.update(file.encode()) # Include filename
+            with open(file_path, "rb") as f:
+                for byte_block in iter(lambda: f.read(65536), b""):
+                    sha256_hash.update(byte_block)
+                    
+    return sha256_hash.hexdigest()
