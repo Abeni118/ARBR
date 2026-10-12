@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from backend.app.decision.actions import DecisionAction
-from backend.app.decision.audit import DecisionAuditLog
-from backend.app.decision.decision_engine import Decision
+from app.decision.actions import DecisionAction
+from app.decision.audit import DecisionAuditLog
+from app.decision.decision_engine import Decision
 
 
 @dataclass(frozen=True)

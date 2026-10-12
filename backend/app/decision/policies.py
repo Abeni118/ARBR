@@ -1,6 +1,6 @@
 from enum import Enum
 
-from backend.app.decision.actions import DecisionAction
+from app.decision.actions import DecisionAction
 
 
 class RiskLevel(str, Enum):

@@ -1,8 +1,8 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from backend.app.decision.actions import DecisionAction
-from backend.app.decision.decision_engine import Decision
+from app.decision.actions import DecisionAction
+from app.decision.decision_engine import Decision
 
 
 @dataclass(frozen=True)
