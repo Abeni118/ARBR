@@ -2,18 +2,16 @@ import {
   Activity,
   AlertTriangle,
   ArrowDownRight,
-  ArrowRight,
   ArrowUpRight,
   Bell,
   ChartNoAxesCombined,
-  ChevronDown,
   ChevronRight,
   CircleHelp,
   Database,
-  Download,
   FileText,
   Fingerprint,
   LayoutDashboard,
+  LogOut,
   LockKeyhole,
   Menu,
   RotateCcw,
@@ -21,9 +19,8 @@ import {
   Settings,
   Shield,
   ShieldCheck,
-  SlidersHorizontal,
 } from 'lucide-react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import { navigationItems } from '../data/dashboardData.js'
 
 const iconMap = {
@@ -41,8 +38,21 @@ const iconMap = {
   fingerprint: Fingerprint,
 }
 
-export function Sidebar({ collapsed, onToggle }) {
-  const location = useLocation()
+export function Sidebar({ collapsed, onToggle, user, onLogout }) {
+  const userLabel = user?.display_name || user?.user_id || 'Signed-in user'
+  const initials = userLabel.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AR'
+  const paths = {
+    Dashboard: '/',
+    'Security Events': '/security-events',
+    'Threat Detection': '/threat-detection',
+    'Risk Analysis': '/risk-analysis',
+    Backups: '/backups',
+    Recovery: '/recovery',
+    'System Isolation': '/system-isolation',
+    'Audit Logs': '/audit-logs',
+    Settings: '/settings',
+    Profile: '/profile',
+  }
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <div className="brand">
@@ -55,19 +65,21 @@ export function Sidebar({ collapsed, onToggle }) {
       <nav className="side-nav" aria-label="Main navigation">
         {navigationItems.map(({ label, icon }) => {
           const Icon = iconMap[icon]
-          const path = label === 'Dashboard' ? '/' : label === 'Security Events' ? '/security-events' : label === 'Threat Detection' ? '/threat-detection' : label === 'Risk Analysis' ? '/risk-analysis' : label === 'Backups' ? '/backups' : label === 'Recovery' ? '/recovery' : label === 'System Isolation' ? '/system-isolation' : label === 'Audit Logs' ? '/audit-logs' : label === 'Settings' ? '/settings' : null
-          const active = path === '/' ? location.pathname === '/' : path === location.pathname
-          const contents = <><Icon size={14} strokeWidth={1.8} /><span>{label}</span>{active && <ChevronRight className="nav-chevron" size={12} />}</>
+          const path = paths[label]
+          const contents = (active) => <><Icon size={14} strokeWidth={1.8} /><span>{label}</span>{active && <ChevronRight className="nav-chevron" size={12} />}</>
           return path
-            ? <Link className={`nav-link ${active ? 'nav-link--active' : ''}`} key={label} to={path} aria-label={label} title={label} aria-current={active ? 'page' : undefined}>{contents}</Link>
-            : <button className="nav-link" key={label} type="button" aria-label={label} title={label}>{contents}</button>
+            ? <NavLink className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} key={label} to={path} end={path === '/'} aria-label={label} title={label}>{({ isActive }) => contents(isActive)}</NavLink>
+            : <button className="nav-link" key={label} type="button" aria-label={label} title={label}>{contents(false)}</button>
         })}
       </nav>
       <div className="sidebar-user">
-        <div className="user-avatar">AR</div>
-        <div className="user-copy"><strong>Alex Rivers</strong><span>Senior Security Analyst</span></div>
-        <ChevronDown className="user-chevron" size={13} />
+        <Link className="sidebar-profile-link" to={paths.Profile} aria-label="View profile" title="Profile">
+          <div className="user-avatar" aria-hidden="true">{initials}</div>
+          <div className="user-copy"><strong title={userLabel}>{userLabel}</strong><span>{user?.role || 'Authenticated'}</span></div>
+        </Link>
+        <button className="logout-button" type="button" onClick={() => { if (window.confirm('Sign out of this account on this browser?')) onLogout() }} aria-label="Sign out" title="Sign out"><LogOut size={14} /></button>
       </div>
+      <Link className="sidebar-password-link" to="/profile">Profile &amp; password</Link>
     </aside>
   )
 }
@@ -94,9 +106,8 @@ export function HeaderBar({ pageTitle = 'Threat Detection', searchValue = '', on
         </button>
         {notificationOpen && (
           <div className="notification-popover">
-            <strong>Security alerts</strong>
-            <span><i className="alert-dot" /> 2 high-priority alerts require review</span>
-            <span><i className="success-dot" /> Immutable snapshot verified</span>
+            <strong>Notifications</strong>
+            <span>Notification data is not provided by the connected API.</span>
           </div>
         )}
       </div>
@@ -123,42 +134,16 @@ export function MetricCard({ metric }) {
   )
 }
 
-export function ActionPanel({ actionState, onAction }) {
-  return (
-    <section className="panel action-panel" aria-labelledby="actions-heading">
-      <div className="panel-heading">
-        <div><h2 id="actions-heading">Tactical Actions</h2><p>Rapid response to system isolation protocols</p></div>
-      </div>
-      <div className="action-buttons">
-        <button className="action-button action-button--danger" onClick={() => onAction('isolate')}>
-          <Shield size={14} /><span>{actionState === 'isolate' ? 'ISOLATION INITIATED' : 'INITIATE SYSTEM ISOLATION'}</span><ArrowUpRight size={13} />
-        </button>
-        <button className="action-button action-button--cyan" onClick={() => onAction('snapshot')}>
-          <Database size={13} /><span>{actionState === 'snapshot' ? 'SNAPSHOT DEPLOYED' : 'DEPLOY IMMUTABLE SNAPSHOT'}</span><ArrowRight size={13} />
-        </button>
-        <button className="action-button action-button--neutral" onClick={() => onAction('restore')}>
-          <RotateCcw size={14} /><span>{actionState === 'restore' ? 'RECOVERY VERIFIED' : 'RESTORE TO POINT-IN-TIME'}</span><ArrowUpRight size={13} />
-        </button>
-      </div>
-      <div className="resource-section">
-        <span className="eyebrow">Resource Allocation</span>
-        <div className="resource-row"><div className="resource-label"><span>Compute Nodes</span><b>82%</b></div><div className="resource-track"><i className="resource-fill resource-fill--cyan" style={{ width: '82%' }} /></div></div>
-        <div className="resource-row"><div className="resource-label"><span>Immutable Storage</span><b>45%</b></div><div className="resource-track"><i className="resource-fill resource-fill--green" style={{ width: '45%' }} /></div></div>
-      </div>
-    </section>
-  )
-}
-
 export function EventsTable({ events, onViewAll }) {
   return (
     <section className="panel events-panel" aria-labelledby="events-heading">
       <div className="events-heading">
-        <div><h2 id="events-heading">Recent Security Events</h2><p>Latest telemetry from global defense nodes</p></div>
+        <div><h2 id="events-heading">Recent Security Events</h2><p>Latest records returned by the backend</p></div>
         <button className="text-button" onClick={onViewAll}>View All Events <ChevronRight size={13} /></button>
       </div>
       <div className="table-scroll">
         <table>
-          <thead><tr><th>Event ID</th><th>Timestamp</th><th>Source IP/Host</th><th>Event Category</th><th>Severity</th><th>Status</th></tr></thead>
+          <thead><tr><th>Event ID</th><th>Occurred At</th><th>Source</th><th>Event Type</th><th>Severity</th><th>Processing Status</th></tr></thead>
           <tbody>{events.map((event) => (
             <tr key={event.id}>
               <td className="event-id">{event.id}</td><td className="event-time">{event.time}</td><td>{event.source}</td><td>{event.category}</td>
@@ -170,22 +155,5 @@ export function EventsTable({ events, onViewAll }) {
         {events.length === 0 && <div className="empty-table"><CircleHelp size={16} /> No matching security events</div>}
       </div>
     </section>
-  )
-}
-
-export function DashboardToolbar({ period, onPeriodChange, onFilter, filterOpen, onExport }) {
-  return (
-    <div className="dashboard-toolbar">
-      <div className="period-selector" aria-label="Chart time range">
-        {['1H', '6H', '24H', '7D'].map((range) => <button key={range} className={period === range ? 'selected' : ''} onClick={() => onPeriodChange(range)}>{range}</button>)}
-      </div>
-      <div className="toolbar-actions">
-        <div className="filter-wrap">
-          <button className={`toolbar-button ${filterOpen ? 'selected' : ''}`} onClick={onFilter}><SlidersHorizontal size={13} />Filter</button>
-          {filterOpen && <div className="filter-popover"><strong>Event filters</strong><label><input type="checkbox" defaultChecked /> Threats &amp; alerts</label><label><input type="checkbox" defaultChecked /> Backup integrity</label><label><input type="checkbox" /> Resolved events</label></div>}
-        </div>
-        <button className="toolbar-button" onClick={onExport}><Download size={13} />Export</button>
-      </div>
-    </div>
   )
 }
