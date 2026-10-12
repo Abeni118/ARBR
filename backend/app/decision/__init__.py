@@ -12,7 +12,7 @@ Files in this package:
 
 Because of the imports below, teammates can write:
 
-    from backend.app.decision import DecisionEngine, SecurityEvent
+    from app.decision import DecisionEngine, SecurityEvent
 
 instead of importing from each individual file.
 """
@@ -30,7 +30,7 @@ from .models import (
 from .risk_scorer import RiskScorer
 
 # __all__ lists the names that are considered the "public" part of this
-# package. It also controls what `from backend.app.decision import *` gives.
+# package. It also controls what `from app.decision import *` gives.
 __all__ = [
     "BackupStatus",
     "Decision",

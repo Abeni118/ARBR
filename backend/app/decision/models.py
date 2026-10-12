@@ -125,7 +125,7 @@ class SecurityEvent:
     # (Writing `= {}` directly is a classic Python bug: all objects would
     # share the same dictionary.)
     raw_data: Dict[str, Any] = field(default_factory=dict)
-
+    host_id: Optional[str] = None # which host/asset the event came from
     def __post_init__(self) -> None:
         """Runs automatically right after the object is created.
 
