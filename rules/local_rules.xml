@@ -10,7 +10,7 @@
 
   <!-- 15+ file events from one agent within 20s -->
   <rule id="100101" level="12" frequency="15" timeframe="20">
-    <if_matched_sid>100100</if_matched_sid>
+    <if_matched_group>syscheck</if_matched_group>
     <same_location />
     <description>Possible ransomware: mass file modification (15+ file events in 20s).</description>
     <mitre><id>T1486</id></mitre>
