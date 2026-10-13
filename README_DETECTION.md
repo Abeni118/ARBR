@@ -1,6 +1,6 @@
 # Wazuh detection module
 
-This is my part of the project. It watches a machine for ransomware-like behaviour and passes what it finds to the backend, so the rest of the system (risk, decisions, isolation, recovery) has something to react to.
+It watches a machine for ransomware-like behaviour and passes what it finds to the backend, so the rest of the system (risk, decisions, isolation, recovery) has something to react to.
 
 There are two halves. A set of custom Wazuh rules that run inside the Wazuh manager, and a small Python service that reads Wazuh's alerts, adds a few checks of its own, and sends the results to the backend API.
 
