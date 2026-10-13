@@ -1,68 +1,63 @@
 import os
 import shutil
-import subprocess
 from datetime import datetime
-from .integrity import calculate_sha256
+
+from .integrity import calculate_directory_sha256
+
 
 def create_backup(source_dir: str, dest_dir: str) -> dict:
-    """
-    Creates a backup using shutil (Windows) and returns metadata.
-    """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_filename = f"backup_{timestamp}"
     backup_path = os.path.join(dest_dir, backup_filename)
 
-    # Ensure destination exists
     os.makedirs(dest_dir, exist_ok=True)
 
     try:
-        # Use shutil to copy the directory
+        if not os.path.isdir(source_dir):
+            raise NotADirectoryError(f"Source directory not found: {source_dir}")
+
         if os.path.exists(backup_path):
             shutil.rmtree(backup_path)
-        shutil.copytree(source_dir, backup_path)
-            
-        # Calculate hash immediately after creation
-        # Note: calculate_sha256 works on files. For a folder, we need to hash the folder or a specific file inside.
-        # For simplicity in this test, let's assume we hash the first file in the backup.
-        # In a real system, you would hash the whole archive.
-        first_file = os.path.join(backup_path, os.listdir(backup_path)[0]) if os.listdir(backup_path) else backup_path
-        
-        # If it's a folder, create a placeholder file for hashing
-        if os.path.isdir(first_file):
-             test_file = os.path.join(backup_path, "hash_placeholder.txt")
-             with open(test_file, "w") as f:
-                 f.write("placeholder")
-             first_file = test_file
 
-        file_hash = calculate_sha256(first_file)
-        size = os.path.getsize(first_file)
+        shutil.copytree(source_dir, backup_path)
+
+        file_hash = calculate_directory_sha256(backup_path)
+
+        size = sum(
+            os.path.getsize(os.path.join(root, name))
+            for root, _, files in os.walk(backup_path)
+            for name in files
+        )
 
         return {
             "filename": backup_filename,
-            "file_path": first_file, # We store the path to the file we hashed
+            "file_path": backup_path,
             "size_bytes": size,
             "sha256_hash": file_hash,
             "status": "TRUSTED",
             "is_verified": True,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.now(),
         }
-    except Exception as e:
-        print(f"Backup failed: {e}")
+
+    except (OSError, shutil.Error):
+        if os.path.exists(backup_path):
+            shutil.rmtree(backup_path, ignore_errors=True)
         return None
 
+
 def lock_backup(file_path: str) -> bool:
-    """
-    Makes a backup file immutable (read-only).
-    On Windows, chattr doesn't exist, so we use os.chmod to make it read-only.
-    """
     if not os.path.exists(file_path):
         return False
-        
+
     try:
-        # Make the file read-only
-        os.chmod(file_path, 0o444)
-        print(f"Backup locked successfully: {file_path}")
+        if os.path.isdir(file_path):
+            for root, _, files in os.walk(file_path):
+                for name in files:
+                    os.chmod(os.path.join(root, name), 0o444)
+            os.chmod(file_path, 0o555)
+        else:
+            os.chmod(file_path, 0o444)
+
         return True
-    except Exception as e:
-        print(f"Failed to lock backup: {e}")
+    except OSError:
         return False
