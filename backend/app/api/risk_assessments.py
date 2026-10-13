@@ -2,12 +2,13 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import RiskAssessmentStatus, RiskLevel
-from app.models import Asset, RiskAssessment, ThreatIncident
+from app.models import Asset, RiskAssessment, SystemSettings, ThreatIncident
 from app.risk import risk_level_for_score
 from app.schemas import Page, RiskAssessmentCreate, RiskAssessmentRead
 from app.services.audit import record_phase2_audit
@@ -53,11 +54,12 @@ def create_risk_assessment(
         _reject_assessment(db, payload, "Asset is not affected by the referenced incident", status.HTTP_409_CONFLICT)
 
     correlation_id = payload.correlation_id or UUID(incident.correlation_id)
+    settings = db.scalar(select(SystemSettings).where(SystemSettings.is_singleton.is_(True)))
     assessment = RiskAssessment(
         incident_id=incident.id,
         asset_id=asset.id,
         score=payload.score,
-        risk_level=risk_level_for_score(payload.score).value,
+        risk_level=risk_level_for_score(payload.score, settings.risk_thresholds if settings else None).value,
         factors=payload.factors,
         confidence=payload.confidence,
         model_version=payload.model_version,

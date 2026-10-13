@@ -8,4 +8,5 @@ export const navigationItems = [
   { label: 'System Isolation', icon: 'lock' },
   { label: 'Audit Logs', icon: 'file' },
   { label: 'Settings', icon: 'settings' },
+  { label: 'Admin Panel', icon: 'shield-check' },
 ]

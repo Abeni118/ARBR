@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.database.session import get_db
 from app.enums import StringEnum
-from app.models import UserPasswordOverride, UserSession
+from app.models import UserAccount, UserPasswordOverride, UserSession
 from app.schemas import AuditEventCreate
 from app.services.audit import record_audit_event
 
@@ -174,10 +174,38 @@ def _configured_credential_for_user_id(user_id: str) -> dict[str, str] | None:
     return next((entry for entry in _configured_credentials() if entry["user_id"] == user_id), None)
 
 
+def is_configured_username(username: str) -> bool:
+    normalized_username = username.strip().casefold()
+    return any(entry["username"].casefold() == normalized_username for entry in _configured_credentials())
+
+
 def authenticate_password(username: str, password: str, db: Session | None = None) -> UserPrincipal | None:
-    """Resolve a configured human credential without exposing its password hash."""
+    """Resolve an environment-managed or administrator-provisioned human identity."""
     configured_users = _configured_credentials()
-    user = next((entry for entry in configured_users if entry["username"].casefold() == username.strip().casefold()), None)
+    normalized_username = username.strip().casefold()
+    configured = next((entry for entry in configured_users if entry["username"].casefold() == normalized_username), None)
+    account = (
+        db.query(UserAccount).filter(UserAccount.username_normalized == normalized_username).one_or_none()
+        if db
+        else None
+    )
+    if account is not None and configured is not None:
+        _verify_password(password, _DUMMY_PASSWORD_HASH)
+        return None
+    if account is not None:
+        if not account.is_active:
+            _verify_password(password, _DUMMY_PASSWORD_HASH)
+            return None
+        if not _verify_password(password, account.password_hash):
+            return None
+        try:
+            role = UserRole(account.role)
+        except ValueError:
+            _verify_password(password, _DUMMY_PASSWORD_HASH)
+            return None
+        return UserPrincipal(account.user_id, role, account.display_name)
+
+    user = configured
     password_override = db.get(UserPasswordOverride, user["user_id"]) if user and db else None
     encoded_hash = password_override.password_hash if password_override else user["password_hash"] if user else _DUMMY_PASSWORD_HASH
     password_matches = _verify_password(password, encoded_hash)
@@ -192,6 +220,17 @@ def authenticate_password(username: str, password: str, db: Session | None = Non
 
 def change_user_password(db: Session, user: UserPrincipal, current_password: str, new_password: str) -> bool:
     """Verify the current password, persist only a new hash, and revoke sessions."""
+    account = db.get(UserAccount, user.user_id)
+    if account is not None:
+        if not _verify_password(current_password, account.password_hash):
+            return False
+        if hmac.compare_digest(current_password.encode("utf-8"), new_password.encode("utf-8")):
+            return False
+        account.password_hash = hash_password(new_password)
+        db.query(UserSession).filter(UserSession.user_id == user.user_id).delete(synchronize_session=False)
+        db.commit()
+        return True
+
     configured = _configured_credential_for_user_id(user.user_id)
     if configured is None:
         return False
@@ -300,7 +339,10 @@ def validate_login_origin(request: Request) -> bool:
         return True
     allowed = {
         value.strip().rstrip("/")
-        for value in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+        for value in os.getenv(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost:5173,http://localhost:5174",
+        ).split(",")
         if value.strip()
     }
     return origin.rstrip("/") in allowed
@@ -329,6 +371,11 @@ def get_current_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"code": "csrf_validation_failed", "message": "The request could not be verified. Refresh and try again."},
             )
+        db_account = db.get(UserAccount, session.user_id)
+        if db_account is not None and not db_account.is_active:
+            db.delete(session)
+            db.commit()
+            raise _authentication_error("account_disabled", "Your account has been deactivated. Please contact an administrator.")
         try:
             role = UserRole(session.role)
         except ValueError:
@@ -348,6 +395,30 @@ def get_current_user(
                 display_name=configured.get("display_name"),
             )
     raise _authentication_error("invalid_authentication", "Invalid Bearer authentication")
+
+
+def get_configured_credentials() -> list[dict[str, str]]:
+    """Return configured user credentials without sensitive passwords/hashes."""
+    return [
+        {
+            "username": item["username"],
+            "user_id": item["user_id"],
+            "role": item["role"],
+            **({"display_name": item["display_name"]} if "display_name" in item else {}),
+        }
+        for item in _configured_credentials()
+    ]
+
+
+def count_active_admins(db: Session) -> int:
+    """Return total active administrators across configured identities and database accounts."""
+    configured_admins = sum(1 for entry in _configured_credentials() if entry.get("role") == UserRole.ADMIN.value)
+    db_admins = (
+        db.query(UserAccount)
+        .filter(UserAccount.role == UserRole.ADMIN.value, UserAccount.is_active.is_(True))
+        .count()
+    )
+    return configured_admins + db_admins
 
 
 def _record_authorization_denial(

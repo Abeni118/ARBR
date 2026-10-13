@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database.session import get_db
 from app.main import app
-from app.models import Base, UserPasswordOverride, UserSession
+from app.models import Asset, AuditEvent, Base, RiskAssessment, SecurityEvent, ThreatIncident, UserAccount, UserPasswordOverride, UserSession
 from app.services.user_auth import CSRF_COOKIE_NAME, SESSION_COOKIE_NAME, hash_password
 
 
@@ -36,6 +36,7 @@ def client(db: Session, monkeypatch):
         {"username": "viewer", "user_id": "viewer-1", "role": "viewer", "password_hash": TEST_PASSWORD_HASH},
         {"username": "analyst", "user_id": "analyst-1", "role": "analyst", "password_hash": TEST_PASSWORD_HASH},
         {"username": "approver", "user_id": "approver-1", "role": "approver", "password_hash": TEST_PASSWORD_HASH},
+        {"username": "admin", "user_id": "admin-1", "role": "admin", "password_hash": TEST_PASSWORD_HASH},
     ]
     monkeypatch.setenv("MVP_USER_CREDENTIALS", json.dumps(credentials))
     monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
@@ -83,6 +84,228 @@ def test_login_issues_opaque_http_only_session_and_resolves_principal(client: Te
     repeated_check = client.get("/api/auth/me")
     assert repeated_check.status_code == 200
     assert repeated_check.json()["csrf_token"] == current_user.json()["csrf_token"]
+    assert client.get("/api/assets").status_code == 200
+
+
+def test_login_allows_vite_fallback_origin_on_port_5174(client: TestClient):
+    origin = "http://localhost:5174"
+    preflight = client.options(
+        "/api/auth/login",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == origin
+
+    response = client.post(
+        "/api/auth/login",
+        headers={"Origin": origin},
+        json={"username": "analyst", "password": TEST_PASSWORD},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["user_id"] == "analyst-1"
+
+
+def test_security_event_summary_reports_real_counts_and_activity(client: TestClient, db: Session):
+    now = datetime.now(timezone.utc)
+    asset = Asset(hostname="summary-test-host", monitoring_status="online")
+    db.add(asset)
+    db.flush()
+    db.add_all(
+        [
+            SecurityEvent(
+                source="summary-test",
+                source_event_id="critical-event",
+                asset_id=asset.id,
+                occurred_at=now,
+                event_type="authentication_failure",
+                event_severity="critical",
+                processing_status="received",
+                summary="Critical test event",
+            ),
+            SecurityEvent(
+                source="summary-test",
+                source_event_id="processed-event",
+                asset_id=asset.id,
+                occurred_at=now,
+                event_type="backup_check",
+                event_severity="info",
+                processing_status="processed",
+                summary="Processed test event",
+            ),
+        ]
+    )
+    db.commit()
+
+    assert _login(client).status_code == 200
+    response = client.get("/api/security-events/summary?period=24h")
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["total_events"] == 2
+    assert result["critical_events"] == 1
+    assert result["pending_processing_events"] == 1
+    assert result["events_today"] == 2
+    assert result["monitored_assets"] == 1
+    assert len(result["activity"]) == 12
+    assert sum(point["events"] for point in result["activity"]) == 2
+    assert sum(point["critical_events"] for point in result["activity"]) == 1
+
+    filtered = client.get("/api/security-events/summary?period=24h&event_severity=info")
+    assert filtered.status_code == 200, filtered.text
+    filtered_result = filtered.json()
+    assert filtered_result["total_events"] == 1
+    assert filtered_result["critical_events"] == 0
+    assert filtered_result["pending_processing_events"] == 0
+    assert sum(point["events"] for point in filtered_result["activity"]) == 1
+
+
+def test_threat_summary_uses_lifecycle_and_current_risk_records(client: TestClient, db: Session):
+    asset = Asset(hostname="threat-summary-test-host")
+    db.add(asset)
+    db.flush()
+    active = ThreatIncident(
+        title="Active summary test",
+        threat_type="test",
+        asset_id=asset.id,
+        detected_at=datetime.now(timezone.utc),
+        lifecycle_status="investigating",
+    )
+    resolved = ThreatIncident(
+        title="Resolved summary test",
+        threat_type="test",
+        asset_id=asset.id,
+        detected_at=datetime.now(timezone.utc),
+        lifecycle_status="resolved",
+    )
+    db.add_all([active, resolved])
+    db.flush()
+    assessment = RiskAssessment(
+        incident_id=active.id,
+        asset_id=asset.id,
+        score=95,
+        risk_level="CRITICAL",
+        factors=[],
+        assessed_at=datetime.now(timezone.utc),
+    )
+    db.add(assessment)
+    db.flush()
+    active.current_risk_assessment_id = assessment.id
+    db.commit()
+
+    assert _login(client).status_code == 200
+    response = client.get("/api/threats/summary")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "total_incidents": 2,
+        "active_threats": 1,
+        "critical_risk_incidents": 1,
+        "resolved_incidents": 1,
+    }
+
+
+def test_only_admin_can_persist_settings_and_reads_remain_available(client: TestClient, db: Session):
+    viewer_login = _login(client, "viewer")
+    assert viewer_login.status_code == 200
+    assert client.get("/api/settings").status_code == 200
+    denied = client.put(
+        "/api/settings",
+        headers=_csrf_headers(client),
+        json={"risk_thresholds": {"low_min": 0, "low_max": 19, "medium_min": 20, "medium_max": 49, "high_min": 50, "high_max": 79, "critical_min": 80, "critical_max": 100}},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "forbidden"
+
+    client.post("/api/auth/logout", headers=_csrf_headers(client))
+    assert _login(client, "admin").status_code == 200
+    updated = client.put(
+        "/api/settings",
+        headers=_csrf_headers(client),
+        json={"risk_thresholds": {"low_min": 0, "low_max": 19, "medium_min": 20, "medium_max": 49, "high_min": 50, "high_max": 79, "critical_min": 80, "critical_max": 100}},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["risk_thresholds"]["medium_max"] == 49
+    assert updated.json()["version"] == 2
+    assert db.scalar(select(AuditEvent).where(AuditEvent.action == "system_settings.updated")) is not None
+
+    unsupported_policy = client.put(
+        "/api/settings",
+        headers=_csrf_headers(client),
+        json={"backup_policy": {"automatic_backup": True}},
+    )
+    assert unsupported_policy.status_code == 422
+
+
+def test_admin_provisions_non_admin_account_and_duplicate_names_are_rejected(client: TestClient, db: Session):
+    public_registration = client.post("/api/auth/register", json={})
+    assert public_registration.status_code == 422
+
+    assert _login(client, "viewer").status_code == 200
+    forbidden = client.post(
+        "/api/users",
+        headers=_csrf_headers(client),
+        json={"username": "new.operator", "role": "analyst", "initial_password": "initial-operator-password-2026"},
+    )
+    assert forbidden.status_code == 403
+    assert client.get("/api/users").status_code == 403
+
+    client.post("/api/auth/logout", headers=_csrf_headers(client))
+    assert _login(client, "admin").status_code == 200
+    configured_username = client.post(
+        "/api/users",
+        headers=_csrf_headers(client),
+        json={"username": "VIEWER", "role": "analyst", "initial_password": "initial-operator-password-2026"},
+    )
+    assert configured_username.status_code == 409
+    invalid_username = client.post(
+        "/api/users",
+        headers=_csrf_headers(client),
+        json={"username": "!not-valid!", "role": "viewer", "initial_password": "initial-operator-password-2026"},
+    )
+    assert invalid_username.status_code == 422
+    created = client.post(
+        "/api/users",
+        headers=_csrf_headers(client),
+        json={"username": "New.Operator", "display_name": "New Operator", "role": "analyst", "initial_password": "initial-operator-password-2026"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["role"] == "analyst"
+    assert created.json()["username"] == "New.Operator"
+    assert "password_hash" not in created.json()
+    assert "initial_password" not in created.json()
+    assert "csrf_token" not in created.json()
+    stored_account = db.get(UserAccount, created.json()["user_id"])
+    assert stored_account is not None
+    assert stored_account.password_hash.startswith("pbkdf2_sha256$")
+    assert "initial-operator-password-2026" not in stored_account.password_hash
+
+    rejected_login = client.post("/api/auth/login", json={"username": "new.operator", "password": "wrong-initial-password"})
+    assert rejected_login.status_code == 401
+
+    duplicate = client.post(
+        "/api/users",
+        headers=_csrf_headers(client),
+        json={"username": "new.operator", "role": "viewer", "initial_password": "another-initial-password-2026"},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "username_already_exists"
+
+    role_escalation = client.post(
+        "/api/users",
+        headers=_csrf_headers(client),
+        json={"username": "new.admin", "role": "admin", "initial_password": "another-initial-password-2026"},
+    )
+    assert role_escalation.status_code == 422
+
+    client.post("/api/auth/logout", headers=_csrf_headers(client))
+    signed_in = client.post("/api/auth/login", json={"username": " new.operator ", "password": "initial-operator-password-2026"})
+    assert signed_in.status_code == 200, signed_in.text
+    assert signed_in.json()["user_id"] == created.json()["user_id"]
+    assert signed_in.json()["role"] == "analyst"
     assert client.get("/api/assets").status_code == 200
 
 

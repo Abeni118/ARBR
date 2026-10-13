@@ -23,6 +23,7 @@ from app.models import (
     Decision,
     RiskAssessment,
     SecurityEvent,
+    SystemSettings,
     ThreatIncident,
 )
 from app.schemas import (
@@ -220,6 +221,45 @@ def test_invalid_references_scores_and_correlations(db: Session):
         )
     assert missing_event.value.status_code == 404
     assert db.scalar(select(func.count(ThreatIncident.id))) == 0
+
+
+def test_saved_risk_thresholds_classify_future_assessments(db: Session):
+    asset = Asset(hostname="configured-risk-threshold-host")
+    settings = SystemSettings(
+        is_singleton=True,
+        risk_thresholds={
+            "low_min": 0,
+            "low_max": 9,
+            "medium_min": 10,
+            "medium_max": 29,
+            "high_min": 30,
+            "high_max": 69,
+            "critical_min": 70,
+            "critical_max": 100,
+        },
+        isolation_policy={},
+        backup_policy={},
+        recovery_policy={},
+        notification_policy={},
+    )
+    db.add_all([asset, settings])
+    db.flush()
+    incident = ThreatIncident(
+        title="Configured threshold incident",
+        threat_type="test",
+        asset_id=asset.id,
+        detected_at=datetime.now(timezone.utc),
+    )
+    db.add(incident)
+    db.commit()
+
+    result = create_risk_assessment(
+        RiskAssessmentCreate(incident_id=UUID(incident.id), asset_id=UUID(asset.id), score=75),
+        db,
+        ComponentPrincipal("phase2-test-risk", frozenset({"risk_assessments:write"})),
+    )
+
+    assert result.risk_level == "CRITICAL"
 
 
 def test_root_health_and_openapi_routes():

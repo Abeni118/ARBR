@@ -1,11 +1,11 @@
 export function formatTimestamp(value) {
-  if (!value) return 'Not provided'
+  if (value === null || value === undefined || value === '') return 'Not recorded'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
 }
 
 export function formatBytes(value) {
-  if (value === null || value === undefined) return 'Not provided'
+  if (value === null || value === undefined) return 'Not recorded'
   if (value < 1024) return `${value} B`
   const units = ['KB', 'MB', 'GB', 'TB', 'PB']
   let amount = value
@@ -18,7 +18,7 @@ export function formatBytes(value) {
 }
 
 export function displayValue(value) {
-  if (value === null || value === undefined || value === '') return 'Not provided'
+  if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }

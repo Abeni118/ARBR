@@ -51,6 +51,7 @@ export function Sidebar({ collapsed, onToggle, user, onLogout }) {
     'System Isolation': '/system-isolation',
     'Audit Logs': '/audit-logs',
     Settings: '/settings',
+    'Admin Panel': '/admin',
     Profile: '/profile',
   }
   return (
@@ -63,7 +64,7 @@ export function Sidebar({ collapsed, onToggle, user, onLogout }) {
         </button>
       </div>
       <nav className="side-nav" aria-label="Main navigation">
-        {navigationItems.map(({ label, icon }) => {
+        {navigationItems.filter(({ label }) => label !== 'Admin Panel' || user?.role === 'admin').map(({ label, icon }) => {
           const Icon = iconMap[icon]
           const path = paths[label]
           const contents = (active) => <><Icon size={14} strokeWidth={1.8} /><span>{label}</span>{active && <ChevronRight className="nav-chevron" size={12} />}</>
@@ -107,7 +108,7 @@ export function HeaderBar({ pageTitle = 'Threat Detection', searchValue = '', on
         {notificationOpen && (
           <div className="notification-popover">
             <strong>Notifications</strong>
-            <span>Notification data is not provided by the connected API.</span>
+            <span>No notification feed is configured for this deployment.</span>
           </div>
         )}
       </div>

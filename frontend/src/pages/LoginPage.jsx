@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Activity, ArrowRight, Eye, EyeOff, Fingerprint, LockKeyhole, Shield, ShieldCheck } from 'lucide-react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext.jsx'
 import './LoginPage.css'
 
@@ -102,6 +102,13 @@ export default function LoginPage() {
               {busy ? <><span className="loading-spinner" /> Verifying credentials…</> : <>Sign in securely <ArrowRight size={16} /></>}
             </button>
           </form>
+
+          <div className="login-register-prompt">
+            <span>Don't have an operations account?</span>
+            <Link to="/register" className="login-register-link">
+              Create an account <ArrowRight size={13} />
+            </Link>
+          </div>
 
           <div className="login-assurance"><LockKeyhole size={13} /><span>Protected with encrypted, time-limited session access.</span></div>
           <footer className="login-panel-footer">Access is monitored and governed by your assigned role.</footer>

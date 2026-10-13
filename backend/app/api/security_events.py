@@ -1,15 +1,23 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import EventProcessingStatus, EventSeverity
-from app.models import SecurityEvent
-from app.schemas import Page, SecurityEventCreate, SecurityEventIngestResponse, SecurityEventRead
+from app.models import Asset, SecurityEvent
+from app.schemas import (
+    Page,
+    SecurityEventActivityPoint,
+    SecurityEventCreate,
+    SecurityEventIngestResponse,
+    SecurityEventRead,
+    SecurityEventSummary,
+)
 from app.services.asset_resolution import resolve_asset
 from app.services.audit import record_phase2_audit
 from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
@@ -177,6 +185,97 @@ def list_security_events(
     if to:
         query = query.filter(SecurityEvent.occurred_at <= as_utc(to))
     return paginate(query.order_by(SecurityEvent.occurred_at.desc()), page, page_size)
+
+
+@router.get("/summary", response_model=SecurityEventSummary)
+def security_event_summary(
+    period: str = Query(default="24h", pattern="^(1h|6h|24h|7d)$"),
+    asset_id: UUID | None = None,
+    source: str | None = None,
+    event_type: str | None = None,
+    event_severity: EventSeverity | None = None,
+    processing_status: EventProcessingStatus | None = None,
+    incident_id: UUID | None = None,
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    """Return database-derived security-event counts and a bounded activity series."""
+    period_durations = {
+        "1h": timedelta(hours=1),
+        "6h": timedelta(hours=6),
+        "24h": timedelta(hours=24),
+        "7d": timedelta(days=7),
+    }
+    now = datetime.now(timezone.utc)
+    start = now - period_durations[period]
+    end = now
+    if from_ is not None:
+        start = max(start, as_utc(from_))
+    if to is not None:
+        end = min(end, as_utc(to))
+    bucket_count = 12
+    bucket_seconds = period_durations[period].total_seconds() / bucket_count
+
+    def filtered_events_query():
+        query = db.query(SecurityEvent)
+        if asset_id:
+            query = query.filter(SecurityEvent.asset_id == str(asset_id))
+        if source:
+            query = query.filter(SecurityEvent.source == source)
+        if event_type:
+            query = query.filter(SecurityEvent.event_type == event_type)
+        if event_severity:
+            query = query.filter(SecurityEvent.event_severity == event_severity.value)
+        if processing_status:
+            query = query.filter(SecurityEvent.processing_status == processing_status.value)
+        if incident_id:
+            query = query.filter(SecurityEvent.incident_id == str(incident_id))
+        return query
+
+    events_query = filtered_events_query().filter(
+        SecurityEvent.occurred_at >= start,
+        SecurityEvent.occurred_at <= end,
+    )
+    buckets = [{"events": 0, "critical_events": 0} for _ in range(bucket_count)]
+    bucket_case = case(
+        *(
+            (SecurityEvent.occurred_at < start + timedelta(seconds=bucket_seconds * index), index - 1)
+            for index in range(1, bucket_count)
+        ),
+        else_=bucket_count - 1,
+    )
+    grouped_activity = events_query.with_entities(
+        bucket_case.label("bucket_index"),
+        func.count(SecurityEvent.id).label("event_count"),
+        func.sum(case((SecurityEvent.event_severity == "critical", 1), else_=0)).label("critical_count"),
+    ).group_by(bucket_case).all()
+    for bucket_index, event_count, critical_count in grouped_activity:
+        buckets[bucket_index]["events"] = event_count
+        buckets[bucket_index]["critical_events"] = critical_count
+
+    utc_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = max(utc_midnight, as_utc(from_)) if from_ is not None else utc_midnight
+    today_end = min(now, as_utc(to)) if to is not None else now
+    return SecurityEventSummary(
+        total_events=events_query.count(),
+        critical_events=events_query.filter(SecurityEvent.event_severity == "critical").count(),
+        pending_processing_events=events_query.filter(
+            SecurityEvent.processing_status.in_(("received", "normalized"))
+        ).count(),
+        events_today=filtered_events_query().filter(
+            SecurityEvent.occurred_at >= today_start,
+            SecurityEvent.occurred_at <= today_end,
+        ).count(),
+        monitored_assets=db.query(Asset).filter(Asset.monitoring_status != "unknown").count(),
+        activity=[
+            SecurityEventActivityPoint(
+                bucket_start=start + timedelta(seconds=bucket_seconds * index),
+                **bucket,
+            )
+            for index, bucket in enumerate(buckets)
+        ],
+    )
 
 
 @router.get("/{event_id}", response_model=SecurityEventRead)

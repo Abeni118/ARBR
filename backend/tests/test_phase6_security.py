@@ -96,7 +96,9 @@ def test_all_browser_read_surfaces_require_authentication(client: TestClient):
     protected_reads = (
         "/api/assets",
         "/api/security-events",
+        "/api/security-events/summary",
         "/api/threats",
+        "/api/threats/summary",
         "/api/risk-assessments",
         "/api/decisions",
         "/api/action-requests",
@@ -107,6 +109,7 @@ def test_all_browser_read_surfaces_require_authentication(client: TestClient):
         "/api/audit-logs",
         "/api/dashboard/summary",
         "/api/settings",
+        "/api/users",
         f"/api/assets/{asset_id}/recovery-points",
         f"/api/assets/{asset_id}/isolation",
     )
