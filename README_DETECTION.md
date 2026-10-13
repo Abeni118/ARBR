@@ -95,10 +95,14 @@ python3 -m detector.main --replay sample_alerts.jsonl                # default s
 
 ## Known limitations
 
-- **Live Wazuh pipeline not validated end to end.** In the local Docker setup, FIM alerts did not
-  fire when monitoring the manager container's own filesystem. The rules and detector were tested
-  against sample alert JSON that follows Wazuh's alert schema. Next step: deploy a real Wazuh
-  agent on a test host and confirm alerts reach `--tail`.
+- **Verified end to end with a real agent (2026-10-13).** A Wazuh 4.9.0 agent on Kali
+  (`test-endpoint`) watching a test folder reported bursts of 20 `.locked` files and a ransom note.
+  Rules `100102`, `100103` and `100104` fired, and the detector delivered the resulting events to
+  the backend (all created, none rejected).
+- **Rule `100101` (mass modification) did not fire** in those tests and is unconfirmed; the
+  detector's own mass-change tracker covers burst detection. When replaying a whole
+  `alerts.json` the tracker uses replay-time clocks, so it over-reports bursts (one detection per
+  event after the threshold); `--tail` mode uses real timing.
 - **Entropy sampling reads the file locally**, so it only works where the detector can open the
   changed file (on the endpoint, not on a manager that only sees alert metadata).
 - **The backend rejects secret-like field names and values** in `summary`, `indicators` and
