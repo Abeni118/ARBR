@@ -40,7 +40,7 @@ export default function ProfilePage() {
         <div className="profile-hero-copy">
           <h2>{accountLabel}</h2>
           <p>{user.display_name ? `Account ID: ${user.user_id}` : 'Account identifier supplied by the authentication API'}</p>
-          <span className="profile-role-badge">{user.role || 'Role not provided'}</span>
+          <span className="profile-role-badge">{user.role || 'Unknown role'}</span>
         </div>
       </section>
 
@@ -52,10 +52,10 @@ export default function ProfilePage() {
           </header>
           <div className="profile-card-content">
             <dl className="profile-details">
-              <dt>Account ID</dt><dd>{user.user_id || 'Not provided'}</dd>
-              <dt>Display name</dt><dd>{user.display_name || 'Not provided'}</dd>
+              <dt>Account ID</dt><dd>{user.user_id || '—'}</dd>
+              <dt>Display name</dt><dd>{user.display_name || 'Not set'}</dd>
               <dt>Username</dt><dd>Not exposed by the authenticated-user API</dd>
-              <dt>Assigned role</dt><dd>{user.role || 'Not provided'}</dd>
+              <dt>Assigned role</dt><dd>{user.role || '—'}</dd>
               <dt>Role permissions</dt><dd>{roleDescriptions[user.role] || 'Permission details are not available for this role.'}</dd>
             </dl>
           </div>
@@ -70,7 +70,7 @@ export default function ProfilePage() {
             <dl className="profile-details">
               <dt>Session status</dt><dd>Authenticated</dd>
               <dt>Authentication</dt><dd>Secure, cookie-based browser session</dd>
-              <dt>Session expiry</dt><dd>Not exposed by the API</dd>
+              <dt>Session expiry</dt><dd>Time-limited; enforced by the server</dd>
               <dt>CSRF protection</dt><dd>Enabled for state-changing requests</dd>
             </dl>
             <p className="profile-note">Session identifiers are held in an HttpOnly cookie. The interface does not display tokens or credential data.</p>

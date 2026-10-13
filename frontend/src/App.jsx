@@ -14,13 +14,20 @@ import {
   SettingsAuditMonitoringPage,
   SettingsGeneralPage,
   SettingsLayout,
+  SettingsBackupIntegrityPage,
+  SettingsIsolationPage,
+  SettingsMonitoringPage,
   SettingsNotificationsPage,
+  SettingsRecoveryPage,
+  SettingsRiskEnginePage,
   SettingsSecurityAccessPage,
   SettingsSystemIntegrationsPage,
 } from './pages/SettingsPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import ChangePasswordPage from './pages/ChangePasswordPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
+import RegistrationPage from './pages/RegistrationPage.jsx'
+import AdminPage from './pages/AdminPage.jsx'
 import './App.css'
 
 function RequireAuth() {
@@ -54,10 +61,16 @@ function DashboardLayout() {
     '/audit-logs': 'Audit Logs',
     '/settings': 'Settings',
     '/settings/general': 'General Settings',
+    '/settings/monitoring': 'Security Monitoring',
+    '/settings/risk-engine': 'Risk Engine',
+    '/settings/backup-integrity': 'Backup & Integrity',
+    '/settings/isolation': 'Isolation Settings',
+    '/settings/recovery': 'Recovery Settings',
     '/settings/security-access': 'Security & Access',
     '/settings/notifications': 'Notifications',
     '/settings/system-integrations': 'System & Integrations',
     '/settings/audit-monitoring': 'Audit & Monitoring',
+    '/admin': 'Admin Panel',
     '/profile': 'Profile',
     '/change-password': 'Change Password',
   }[location.pathname] || 'Dashboard'
@@ -82,6 +95,7 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginGate />} />
+      <Route path="/register" element={<RegistrationPage />} />
       <Route element={<RequireAuth />}>
         <Route element={<DashboardLayout />}>
           <Route index element={<PageContent component={DashboardPage} />} />
@@ -92,9 +106,15 @@ function App() {
           <Route path="system-isolation" element={<PageContent component={SystemIsolationPage} />} />
           <Route path="recovery" element={<PageContent component={RecoveryPage} />} />
           <Route path="audit-logs" element={<PageContent component={AuditLogsPage} />} />
+          <Route path="admin" element={<AdminPage />} />
           <Route path="settings" element={<SettingsLayout />}>
             <Route index element={<Navigate to="general" replace />} />
             <Route path="general" element={<SettingsGeneralPage />} />
+            <Route path="monitoring" element={<SettingsMonitoringPage />} />
+            <Route path="risk-engine" element={<SettingsRiskEnginePage />} />
+            <Route path="backup-integrity" element={<SettingsBackupIntegrityPage />} />
+            <Route path="isolation" element={<SettingsIsolationPage />} />
+            <Route path="recovery" element={<SettingsRecoveryPage />} />
             <Route path="security-access" element={<SettingsSecurityAccessPage />} />
             <Route path="notifications" element={<SettingsNotificationsPage />} />
             <Route path="system-integrations" element={<SettingsSystemIntegrationsPage />} />

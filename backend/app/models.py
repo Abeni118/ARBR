@@ -509,6 +509,26 @@ class UserPasswordOverride(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class UserAccount(Base):
+    """User account model supporting administrative provisioning and public registration with viewer default."""
+
+    __tablename__ = "user_accounts"
+    __table_args__ = (
+        UniqueConstraint("username_normalized", name="uq_user_account_username_normalized"),
+        CheckConstraint("role IN ('viewer', 'analyst', 'approver', 'admin')", name="ck_user_account_role"),
+    )
+
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    username_normalized: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="viewer")
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 def _reject_audit_mutation(_mapper, _connection, _target) -> None:
     raise ValueError("Audit events are append-only and cannot be updated or deleted")
 

@@ -54,6 +54,40 @@ def initialize_database() -> None:
         audit_columns = {column["name"] for column in inspect(connection).get_columns("audit_events")}
         if "isolation_action_id" not in audit_columns:
             connection.execute(text("ALTER TABLE audit_events ADD COLUMN isolation_action_id VARCHAR(36)"))
+        user_account_columns = {
+            column["name"] for column in inspect(connection).get_columns("user_accounts")
+        }
+        table_sql = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name='user_accounts'")
+        ).scalar()
+        if table_sql and "ck_user_account_non_admin_role" in table_sql:
+            has_is_active = "is_active" in user_account_columns
+            select_is_active = "is_active" if has_is_active else "1"
+            connection.execute(text("""
+                CREATE TABLE user_accounts_migrated (
+                    user_id VARCHAR(36) NOT NULL,
+                    username VARCHAR(64) NOT NULL,
+                    username_normalized VARCHAR(64) NOT NULL,
+                    display_name VARCHAR(255),
+                    role VARCHAR(20) NOT NULL DEFAULT 'viewer',
+                    password_hash VARCHAR(255) NOT NULL,
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    created_by_user_id VARCHAR(255) NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    PRIMARY KEY (user_id),
+                    CONSTRAINT uq_user_account_username_normalized UNIQUE (username_normalized),
+                    CONSTRAINT ck_user_account_role CHECK (role IN ('viewer', 'analyst', 'approver', 'admin'))
+                )
+            """))
+            connection.execute(text(f"""
+                INSERT INTO user_accounts_migrated (user_id, username, username_normalized, display_name, role, password_hash, is_active, created_by_user_id, created_at)
+                SELECT user_id, username, username_normalized, display_name, role, password_hash, {select_is_active}, created_by_user_id, created_at
+                FROM user_accounts
+            """))
+            connection.execute(text("DROP TABLE user_accounts"))
+            connection.execute(text("ALTER TABLE user_accounts_migrated RENAME TO user_accounts"))
+        elif "is_active" not in user_account_columns:
+            connection.execute(text("ALTER TABLE user_accounts ADD COLUMN is_active BOOLEAN DEFAULT 1 NOT NULL"))
     with SessionLocal() as db:
         settings = db.scalar(select(SystemSettings).where(SystemSettings.is_singleton.is_(True)))
         if settings is None:

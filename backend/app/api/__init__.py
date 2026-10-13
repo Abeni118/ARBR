@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api import (
     action_requests,
+    admin,
     assets,
     auth,
     audit_logs,
@@ -16,11 +17,13 @@ from app.api import (
     security_events,
     settings,
     threats,
+    users,
 )
 
 api_router = APIRouter()
 for route_module in (
     auth,
+    admin,
     health,
     dashboard,
     assets,
@@ -35,6 +38,7 @@ for route_module in (
     recovery,
     audit_logs,
     settings,
+    users,
 ):
     api_router.include_router(route_module.router)
 

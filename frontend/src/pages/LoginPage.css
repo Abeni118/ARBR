@@ -66,6 +66,39 @@
 .login-submit:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
 .login-submit:disabled { cursor: not-allowed; opacity: .68; }
 .login-submit .loading-spinner { width: 13px; height: 13px; border-color: #07505a; border-top-color: transparent; }
+.login-register-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  border: 1px solid #1f2f45;
+  border-radius: 4px;
+  background: #111c2e;
+  font-size: 10px;
+}
+.login-register-prompt span {
+  color: #8fa0b5;
+}
+.login-register-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #24d0dd;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color .15s ease, transform .15s ease;
+}
+.login-register-link:hover {
+  color: #5be3ee;
+  transform: translateX(2px);
+}
+.login-message--success {
+  border-color: #176646;
+  color: #79f0ba;
+  background: #0d2e20;
+}
 .login-assurance { display: flex; align-items: center; gap: 8px; margin-top: 22px; color: #79889d; font-size: 9px; }
 .login-assurance svg { color: #26cbd8; }
 .login-panel-footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid #263147; color: #67758a; font-size: 9px; line-height: 1.5; }
