@@ -26,7 +26,7 @@ tests/test_detector_api.py  Unit tests for the converter and API sink (no networ
    - `100101` mass file-change burst (15+ events in 20s from one agent)
    - `100102` suspicious extension (`.locked`, `.encrypted`, ...)
    - `100103` ransom-note-style filename
-   - `100104` composite: mass-change + bad extension (highest confidence)
+   - `100104` 10+ ransomware-extension files in 30s from one agent (highest confidence)
    - `100105` shadow-copy / backup deletion command (Windows; needs Sysmon or command logging)
 2. **Python side (`detector/`)** - consumes the alert JSON and adds checks that are awkward in XML:
    a sliding-window mass-change tracker, Shannon entropy sampling of changed files
