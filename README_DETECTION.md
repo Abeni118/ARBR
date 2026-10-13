@@ -1,112 +1,121 @@
-# Wazuh & Detection Module
+# Wazuh detection module
 
-Member 1's piece of the attack-resistant backup/recovery pipeline:
-**Monitor -> Detect**, feeding the backend API (dashboard, risk, decision).
+This is my part of the project. It watches a machine for ransomware-like behaviour and passes what it finds to the backend, so the rest of the system (risk, decisions, isolation, recovery) has something to react to.
 
-## What's here
+There are two halves. A set of custom Wazuh rules that run inside the Wazuh manager, and a small Python service that reads Wazuh's alerts, adds a few checks of its own, and sends the results to the backend API.
 
 ```
-rules/local_rules.xml     Custom Wazuh correlation rules (ransomware patterns)
+files change on the endpoint
+  -> Wazuh agent
+  -> Wazuh manager (our rules run here, alerts land in alerts.json)
+  -> detector (Python)
+  -> backend API: POST /api/internal/security-events
+```
+
+## What's in here
+
+```
+rules/local_rules.xml      the custom Wazuh rules
 detector/
-  config.py               Settings (env-var driven)
-  analysis.py             Entropy check, extension/pattern matching, mass-change tracker
-  schema.py               Detection record format
-  processor.py            Turns one raw Wazuh alert into 0+ Detection records
-  converter.py            Detection -> backend SecurityEvent payload
-  api_sink.py             POSTs events to the backend API (used with --sink api)
-  sink.py                 Writes Detections to a MySQL `detections` table, or detections.jsonl
-  main.py                 Entrypoint: --tail (live) or --replay (testing), --sink db|api
-sample_alerts.jsonl       Sample alert stream for testing without a live pipeline
-tests/test_detector_api.py  Unit tests for the converter and API sink (no network needed)
+  processor.py             turns one Wazuh alert into zero or more detections
+  analysis.py              entropy check, extension and filename checks, mass-change counter
+  converter.py             turns a detection into the JSON the backend expects
+  api_sink.py              sends it to the backend (and keeps a local copy if that fails)
+  sink.py                  older option: write to a MySQL table or detections.jsonl
+  schema.py                the Detection record
+  config.py                settings, all read from environment variables
+  main.py                  command line entry point
+sample_alerts.jsonl        a few made-up alerts for testing without Wazuh
+tests/test_detector_api.py unit tests for the converter and the API sink
 ```
 
-## Detection logic
+## The Wazuh rules
 
-1. **Wazuh side (`rules/local_rules.xml`)** - correlation rules that run in the manager:
-   - `100101` mass file-change burst (15+ events in 20s from one agent)
-   - `100102` suspicious extension (`.locked`, `.encrypted`, ...)
-   - `100103` ransom-note-style filename
-   - `100104` 10+ ransomware-extension files in 30s from one agent (highest confidence)
-   - `100105` shadow-copy / backup deletion command (Windows; needs Sysmon or command logging)
-2. **Python side (`detector/`)** - consumes the alert JSON and adds checks that are awkward in XML:
-   a sliding-window mass-change tracker, Shannon entropy sampling of changed files
-   (encrypted data approaches 8 bits/byte), extension and ransom-note matching.
+All of them are in `rules/local_rules.xml` and use IDs 100100 to 100105.
 
-## How it connects to the rest of the system
+- **100100** matches every file-integrity event, so the other rules have something to count.
+- **100101** is meant to fire on a burst of 15 or more file events within 20 seconds from one agent.
+- **100102** fires when a file gets an extension that ransomware commonly uses (`.locked`, `.encrypted`, `.wcry` and so on).
+- **100103** fires on a file named like a ransom note, such as `READ_ME_TO_DECRYPT.txt`.
+- **100104** is the high-confidence one: 10 or more files with those extensions within 30 seconds from the same agent.
+- **100105** looks for Windows commands that delete shadow copies or backups (`vssadmin delete shadows` and similar). It needs Sysmon or command logging on the endpoint, and I haven't tested it.
 
-Detections are sent to the backend as security events:
-
-```
-Wazuh alerts.json -> detector (processor) -> converter -> POST /api/internal/security-events
-```
-
-| API field (`SecurityEventCreate`) | Comes from |
-|---|---|
-| `source` | `DETECTOR_SOURCE` (default `wazuh-detector`) |
-| `source_event_id` | `<wazuh alert id>:<detection_type>` - deterministic, so replaying the same alert is reported as a duplicate (HTTP 200) instead of creating a second event |
-| `occurred_at` | detection timestamp |
-| `event_type` | detection type (`suspicious_extension`, `ransom_note`, `mass_file_modification`, ...) |
-| `event_severity` | `low` / `medium` / `high` / `critical` |
-| `summary`, `indicators`, `evidence` | built from the detection (file path, counts, Wazuh rule/alert ids) |
-| `asset_id` **or** `asset_external_ref` | exactly one: `DETECTOR_ASSET_ID` if set, otherwise `{external_source: "wazuh", external_id: <agent name>}` |
-
-Delivery rules (see `api_sink.py`): `201` created, `200` duplicate. Rejections (`4xx`: unknown
-asset, validation, bad token) and outages (`5xx`, unreachable) are logged and the detection is
-appended to `detections_unsent.jsonl`, so nothing is lost. With no token configured nothing is
-sent at all.
-
-### Setup
-
-1. **Backend: create a component token** with the `security_events:write` scope and start the
-   API with it (generate the value; never commit it):
-   ```bash
-   TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-   export MVP_COMPONENT_TOKENS='[{"component_id":"wazuh-detector","token":"'"$TOKEN"'","scopes":["security_events:write"]}]'
-   cd backend && python3 -m uvicorn app.main:app --port 8000
-   ```
-2. **Register the monitored host as an asset** in the backend. The API never creates assets
-   implicitly. Either note its UUID and set `DETECTOR_ASSET_ID`, or register it with
-   `external_source` = `wazuh` and `external_id` = the Wazuh agent name (e.g. `test-endpoint`).
-3. **Run the detector** with the same token:
-   ```bash
-   export DETECTOR_API_URL=http://127.0.0.1:8000
-   export DETECTOR_API_TOKEN="$TOKEN"
-   # export DETECTOR_ASSET_ID=<asset uuid>      # optional, see above
-   python3 -m detector.main --replay sample_alerts.jsonl --sink api
-   python3 -m detector.main --tail --alerts-path /var/ossec/logs/alerts/alerts.json --sink api
-   ```
-
-Environment variables: `DETECTOR_API_URL`, `DETECTOR_API_TOKEN`, `DETECTOR_SOURCE`,
-`DETECTOR_ASSET_ID`, `DETECTOR_ASSET_EXTERNAL_SOURCE`, `DETECTOR_API_TIMEOUT_SECONDS`.
-
-## Installing the Wazuh rules
+To load them into the manager:
 
 ```bash
 docker cp rules/local_rules.xml single-node-wazuh.manager-1:/var/ossec/etc/rules/local_rules.xml
-docker exec -it single-node-wazuh.manager-1 /var/ossec/bin/wazuh-control restart
+docker exec single-node-wazuh.manager-1 chown root:wazuh /var/ossec/etc/rules/local_rules.xml
+docker exec single-node-wazuh.manager-1 /var/ossec/bin/wazuh-analysisd -t
+docker exec single-node-wazuh.manager-1 /var/ossec/bin/wazuh-control restart
 ```
 
-## Testing
+The `-t` line checks the rules before you restart, so a typo can't take the manager down. If it exits with 0, you're fine.
+
+## The detector
+
+It reads Wazuh alerts, and for file-integrity alerts it checks:
+
+- whether the file has a ransomware-style extension
+- whether the name looks like a ransom note
+- whether the first few KB of the file look random (high entropy, which is what encrypted data looks like). This only works where the detector can actually open the file, so on the endpoint itself.
+- whether lots of files changed in a short time. This is its own counter, separate from rule 100101.
+
+Each finding becomes a detection, and `converter.py` maps it onto the backend's `SecurityEventCreate` format:
+
+| Backend field | What I send |
+|---|---|
+| `source` | `wazuh-detector` |
+| `source_event_id` | the Wazuh alert id plus the detection type, so sending the same alert twice is recognised as a duplicate |
+| `event_type` | the detection type, e.g. `suspicious_extension` |
+| `event_severity` | `low`, `medium`, `high` or `critical` |
+| `summary`, `indicators`, `evidence` | a one-line description, the file path, and details like the Wazuh rule id |
+| asset | either a fixed `DETECTOR_ASSET_ID`, or the agent name as an external reference |
+
+If the backend answers 201 the event is new, and 200 means it was already there. If it rejects the event (unknown asset, bad token) or can't be reached, the detection is written to `detections_unsent.jsonl` so nothing is lost. With no token set, nothing is sent at all.
+
+## Running it
+
+The backend only accepts events for an asset that already exists, and it never creates one itself. So before anything else, register the monitored machine. Its external source should be `wazuh` and its external id should be the Wazuh agent name (mine is `test-endpoint`). In my own testing I added the asset straight into the database with the app's models instead of going through the API, because that needs a logged-in analyst.
+
+Then start the backend with a token for the detector (make up your own, and don't commit it):
 
 ```bash
-python3 -m pytest tests/test_detector_api.py -q     # converter + API sink, no network
-python3 -m detector.main --replay sample_alerts.jsonl                # default sink (DB or detections.jsonl)
+export DETECTOR_API_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+export MVP_COMPONENT_TOKENS='[{"component_id":"wazuh-detector","token":"'"$DETECTOR_API_TOKEN"'","scopes":["security_events:write"]}]'
+cd backend && python3 -m uvicorn app.main:app --port 8000
 ```
 
-## Known limitations
+And run the detector in another terminal with the same token:
 
-- **Verified end to end with a real agent (2026-10-13).** A Wazuh 4.9.0 agent on Kali
-  (`test-endpoint`) watching a test folder reported bursts of 20 `.locked` files and a ransom note.
-  Rules `100102`, `100103` and `100104` fired, and the detector delivered the resulting events to
-  the backend (all created, none rejected).
-- **Rule `100101` (mass modification) did not fire** in those tests and is unconfirmed; the
-  detector's own mass-change tracker covers burst detection. When replaying a whole
-  `alerts.json` the tracker uses replay-time clocks, so it over-reports bursts (one detection per
-  event after the threshold); `--tail` mode uses real timing.
-- **Entropy sampling reads the file locally**, so it only works where the detector can open the
-  changed file (on the endpoint, not on a manager that only sees alert metadata).
-- **The backend rejects secret-like field names and values** in `summary`, `indicators` and
-  `evidence`. The detector sends none, but a file path containing a credential-looking string
-  could be rejected; such events are kept in `detections_unsent.jsonl`.
-- The `Detection` fields in `schema.py` are mapped one way (Detection -> SecurityEvent). If the
-  risk or decision components need more detail, add it to `evidence` in `converter.py`.
+```bash
+export DETECTOR_API_URL=http://127.0.0.1:8000
+export DETECTOR_API_TOKEN=<the same token>
+
+# try it on the sample alerts
+python3 -m detector.main --replay sample_alerts.jsonl --sink api
+
+# follow live alerts from the manager
+python3 -m detector.main --tail --alerts-path /var/ossec/logs/alerts/alerts.json --sink api
+```
+
+Settings you can change with environment variables: `DETECTOR_API_URL`, `DETECTOR_API_TOKEN`, `DETECTOR_SOURCE`, `DETECTOR_ASSET_ID`, `DETECTOR_ASSET_EXTERNAL_SOURCE`, `DETECTOR_API_TIMEOUT_SECONDS`, and the detection thresholds in `config.py`.
+
+## Tests
+
+```bash
+python3 -m pytest tests/test_detector_api.py -q
+```
+
+These 23 tests cover the field mapping, duplicate handling, and every kind of response from the API (created, duplicate, rejected, server error, unreachable, no token). They don't need the backend or Wazuh running.
+
+## What I've tested and what I haven't
+
+I installed a Wazuh 4.9.0 agent on my Kali machine, named it `test-endpoint`, and pointed it at a test folder. I then created batches of 20 files, renamed them to `.locked`, and dropped in a fake ransom note. On the manager, rules 100102, 100103 and 100104 fired. I replayed the manager's `alerts.json` through the detector against the real backend, and the events were created with nothing rejected. Sending the same sample alerts twice gave duplicates instead of new rows.
+
+Things that didn't work out, or that I haven't checked:
+
+- **Rule 100101 never fired.** I tried counting both the base rule and any syscheck event and it still didn't trigger, and I didn't work out why. The detector's own mass-change counter does cover bursts, so detection still works, but the Wazuh rule itself is unconfirmed.
+- **The mass-change counter is noisy when replaying a whole file.** It uses the clock at replay time, so a big `alerts.json` read in one second looks like one enormous burst, and it reports a detection for every event after the 15th. In `--tail` mode the timing is real and it should be much quieter, but I haven't run that for long.
+- **Rule 100105 (Windows backup deletion) is untested.** I only had a Linux endpoint.
+- **The backend rejects secret-looking field names and values** in `summary`, `indicators` and `evidence`. The detector doesn't send any, but a file path that happens to look like a credential could get refused. Those events would end up in `detections_unsent.jsonl`.
+- **Entropy checks need access to the file**, so they work on the endpoint but not if the detector only sees alert metadata from the manager.
