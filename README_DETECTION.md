@@ -108,14 +108,3 @@ python3 -m pytest tests/test_detector_api.py -q
 
 These 23 tests cover the field mapping, duplicate handling, and every kind of response from the API (created, duplicate, rejected, server error, unreachable, no token). They don't need the backend or Wazuh running.
 
-## What I've tested and what I haven't
-
-I installed a Wazuh 4.9.0 agent on my Kali machine, named it `test-endpoint`, and pointed it at a test folder. I then created batches of 20 files, renamed them to `.locked`, and dropped in a fake ransom note. On the manager, rules 100102, 100103 and 100104 fired. I replayed the manager's `alerts.json` through the detector against the real backend, and the events were created with nothing rejected. Sending the same sample alerts twice gave duplicates instead of new rows.
-
-Things that didn't work out, or that I haven't checked:
-
-- **Rule 100101 never fired.** I tried counting both the base rule and any syscheck event and it still didn't trigger, and I didn't work out why. The detector's own mass-change counter does cover bursts, so detection still works, but the Wazuh rule itself is unconfirmed.
-- **The mass-change counter is noisy when replaying a whole file.** It uses the clock at replay time, so a big `alerts.json` read in one second looks like one enormous burst, and it reports a detection for every event after the 15th. In `--tail` mode the timing is real and it should be much quieter, but I haven't run that for long.
-- **Rule 100105 (Windows backup deletion) is untested.** I only had a Linux endpoint.
-- **The backend rejects secret-looking field names and values** in `summary`, `indicators` and `evidence`. The detector doesn't send any, but a file path that happens to look like a credential could get refused. Those events would end up in `detections_unsent.jsonl`.
-- **Entropy checks need access to the file**, so they work on the endpoint but not if the detector only sees alert metadata from the manager.
