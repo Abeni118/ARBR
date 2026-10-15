@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Activity, AlertTriangle, CalendarDays, Clock3, Database, Download, Fingerprint, ShieldCheck } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { useNavigate } from 'react-router-dom'
 import { api, queryString } from './client.js'
 import { displayValue, formatBytes, formatTimestamp, statusClass } from './formatters.js'
 import { ApiDetail, ApiState } from '../components/ApiState.jsx'
@@ -73,8 +75,54 @@ function Metric({ label, value, icon = 'activity', support }) {
   return <MetricCard metric={{ label, value: displayValue(value), icon, ...(support ? { trend: support, trendTone: 'good' } : {}) }} />
 }
 
-export function DashboardPage({ globalSearch, onGlobalSearchChange }) {
+const eventPeriods = [
+  { value: '1h', label: '1H' },
+  { value: '6h', label: '6H' },
+  { value: '24h', label: '24H' },
+  { value: '7d', label: '7D' },
+]
+
+function EventActivityChart({ points, period }) {
+  const formatBucket = (value) => {
+    const date = new Date(value)
+    return period === '7d'
+      ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
+  return <ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{ top: 10, right: 8, bottom: 0, left: -12 }}>
+    <CartesianGrid vertical={false} stroke="#30343d" strokeDasharray="2 5" />
+    <XAxis dataKey="bucket_start" axisLine={false} tickLine={false} tickFormatter={formatBucket} tick={{ fill: '#9298a4', fontSize: 9, fontFamily: 'ui-monospace, monospace' }} dy={8} />
+    <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: '#9298a4', fontSize: 9, fontFamily: 'ui-monospace, monospace' }} />
+    <Tooltip labelFormatter={(value) => formatBucket(value)} contentStyle={{ border: '1px solid #384253', borderRadius: 2, color: '#dce3ec', background: '#131e33', fontSize: 9 }} />
+    <Line type="monotone" dataKey="events" name="All events" stroke="#09c7d8" strokeWidth={1.7} dot={false} activeDot={{ r: 3, fill: '#09c7d8', stroke: '#101a34', strokeWidth: 2 }} />
+    <Line type="monotone" dataKey="critical_events" name="Critical events" stroke="#f03c4b" strokeWidth={1.5} dot={false} activeDot={{ r: 3, fill: '#f03c4b', stroke: '#101a34', strokeWidth: 2 }} />
+  </LineChart></ResponsiveContainer>
+}
+
+function exportSecurityEvents(events) {
+  const columns = [
+    ['Event ID', 'id'],
+    ['Occurred At', 'occurred_at'],
+    ['Source', 'source'],
+    ['Event Type', 'event_type'],
+    ['Severity', 'event_severity'],
+    ['Processing Status', 'processing_status'],
+    ['Summary', 'summary'],
+  ]
+  const quote = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`
+  const csv = [columns.map(([label]) => quote(label)), ...events.map((event) => columns.map(([, key]) => quote(event[key])))].map((row) => row.join(',')).join('\n')
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'security-events.csv'
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+export function DashboardPage({ globalSearch }) {
+  const navigate = useNavigate()
   const { data, loading, error } = useApiResource('/dashboard/summary')
+  const { data: activity, loading: activityLoading, error: activityError } = useApiResource('/security-events/summary?period=24h')
   const events = useMemo(() => (data?.recent_events || []).map((event) => ({
     id: event.id,
     time: formatTimestamp(event.occurred_at),
@@ -95,13 +143,13 @@ export function DashboardPage({ globalSearch, onGlobalSearchChange }) {
           <Metric label="Critical-Risk Incidents" value={data.critical_risk_incidents} icon="database" />
         </section>
         <div className="dashboard-grid">
-          <section className="panel chart-panel"><div className="chart-heading"><div><h2>Risk Overview &amp; Threat Trend</h2><p>Time-series metrics are not provided by the dashboard API.</p></div></div><div className="api-unavailable">Historical risk and threat trend data: Not provided by GET /api/dashboard/summary.</div></section>
+          <section className="panel chart-panel"><div className="chart-heading"><div><h2>Security Event Activity</h2><p>Event and critical-event counts from persisted records over the last 24 hours.</p></div><div className="chart-legend"><span><i className="legend-dot" />All events</span><span><i className="legend-dot legend-dot--threat" />Critical</span></div></div><div className="chart-area"><ApiState loading={activityLoading} error={activityError} empty={activity && activity.total_events === 0 ? 'No security events were recorded in the last 24 hours.' : null}>{activity && <EventActivityChart points={activity.activity} period="24h" />}</ApiState></div></section>
           <section className="panel action-panel"><div className="panel-heading"><div><h2>Current Risk Distribution</h2><p>Current incident counts returned by the API.</p></div></div><div className="api-distribution">{riskRows.map(([level, count]) => <div key={level}><span>{level}</span><strong>{count}</strong></div>)}</div></section>
         </div>
-        <EventsTable events={events} onViewAll={() => onGlobalSearchChange?.('')} />
+        <EventsTable events={events} onViewAll={() => navigate('/security-events')} />
       </>}
     </ApiState>
-    <footer className="status-footer"><span>API metrics shown exactly as provided; no time-series values are inferred.</span></footer>
+    <footer className="status-footer"><span>Metrics and activity are calculated from persisted backend records.</span></footer>
   </main>
 }
 
@@ -119,21 +167,39 @@ function SecurityEventDrawer({ eventId, onClose }) {
 
 export function SecurityEventsPage({ globalSearch, onGlobalSearchChange }) {
   const [filters, setFilters] = useState({ event_severity: '', event_type: '', processing_status: '', source: '', asset_id: '', incident_id: '', from: '', to: '' })
+  const [period, setPeriod] = useState('24h')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [selectedId, setSelectedId] = useState(null)
   const [refresh, setRefresh] = useState(0)
   const path = `/security-events${queryString({ page, page_size: pageSize, ...filters })}`
   const { data, loading, error } = useApiResource(path, refresh)
+  const { data: summary, loading: summaryLoading, error: summaryError } = useApiResource(`/security-events/summary${queryString({ period, ...filters })}`, refresh)
   const items = data?.items || []
   const visible = items.filter((event) => !globalSearch?.trim() || [event.id, event.source, event.source_event_id, event.asset_id, event.incident_id, event.event_type, event.summary, event.correlation_id].some((value) => String(value || '').toLowerCase().includes(globalSearch.trim().toLowerCase())))
   const updateFilter = (name, value) => { setFilters((current) => ({ ...current, [name]: value })); setPage(1) }
+  const selectPeriod = (value) => {
+    const durationMs = { '1h': 60 * 60 * 1000, '6h': 6 * 60 * 60 * 1000, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000 }[value]
+    const end = new Date()
+    const start = new Date(end.getTime() - durationMs)
+    setPeriod(value)
+    setFilters((current) => ({ ...current, from: start.toISOString(), to: end.toISOString() }))
+    setPage(1)
+  }
   return <main className="security-events-main">
-    <PageHeading title="Security Events" description="Normalized security telemetry from the authenticated API." />
-    <section className="event-summary-grid" aria-label="Security event summary">
-      {[['Total Events', data?.total ?? '—'], ['Critical Events', 'Not provided'], ['Unresolved Events', 'Not provided'], ['Events Today', 'Not provided'], ['Monitored Nodes', 'Not provided']].map(([label, value]) => <article className="event-summary-card" key={label}><div className="event-summary-copy"><span className="eyebrow">{label}</span><strong>{value}</strong><span className="event-summary-support">{label === 'Total Events' ? 'Matching current API filters' : 'Not provided by this API'}</span></div></article>)}
-    </section>
-    <section className="panel event-activity-panel"><header className="event-activity-heading"><div><h2>Event Activity</h2><p>Historical time series are not provided by the security-event endpoints.</p></div></header><div className="api-unavailable">No chart data is inferred from the paginated event records.</div></section>
+    <PageHeading title="Security Events" description="Normalized security telemetry and database-derived activity." actions={<div className="event-page-toolbar"><div className="period-selector" aria-label="Activity period">{eventPeriods.map(({ value, label }) => <button key={value} type="button" className={period === value ? 'selected' : ''} aria-pressed={period === value} onClick={() => selectPeriod(value)}>{label}</button>)}</div><button className="toolbar-button" type="button" onClick={() => exportSecurityEvents(visible)} disabled={!visible.length}><Download size={13} />Export page</button></div>} />
+    <ApiState loading={summaryLoading} error={summaryError} onRetry={() => setRefresh((value) => value + 1)}>
+      {summary && <section className="event-summary-grid" aria-label="Security event summary">
+        {[
+          ['Total Events', summary.total_events, `${period.toUpperCase()} · all matching API filters`, Activity, 'cyan'],
+          ['Critical Events', summary.critical_events, 'Critical severity in selected period', AlertTriangle, 'red'],
+          ['Pending Processing', summary.pending_processing_events, 'Received or normalized records', Clock3, 'amber'],
+          ['Events Today', summary.events_today, 'UTC calendar day', CalendarDays, 'green'],
+          ['Monitored Assets', summary.monitored_assets, 'Assets with a reported monitoring state', Database, 'cyan'],
+        ].map(([label, value, support, Icon, tone]) => <article className={`event-summary-card event-summary-card--${tone}`} key={label}><div className="event-summary-copy"><span className="eyebrow">{label}</span><strong>{value.toLocaleString()}</strong><span className="event-summary-support">{support}</span></div><div className="event-summary-icon"><Icon size={17} strokeWidth={1.8} /></div></article>)}
+      </section>}
+    </ApiState>
+    <section className="panel event-activity-panel"><header className="event-activity-heading"><div><h2>Event Activity</h2><p>Persisted event counts grouped across the selected period.</p></div><div className="chart-legend"><span><i className="legend-dot" />All Events</span><span><i className="legend-dot legend-dot--threat" />Critical</span></div></header><div className="event-activity-chart"><ApiState loading={summaryLoading} error={summaryError} onRetry={() => setRefresh((value) => value + 1)} empty={summary && summary.total_events === 0 ? 'No security events were recorded in the selected period.' : null}>{summary && <EventActivityChart points={summary.activity} period={period} />}</ApiState></div></section>
     <section className="panel security-log-panel"><header className="security-log-heading"><div><h2>Security Event Log</h2><p>Fields and processing states returned by the API.</p></div></header>
       <div className="event-filter-bar"><label className="event-search"><span>Search</span><input type="search" value={globalSearch || ''} onChange={(event) => { onGlobalSearchChange?.(event.target.value); setPage(1) }} placeholder="Search returned fields" /></label>
         <div className="event-select-filters">
@@ -146,7 +212,7 @@ export function SecurityEventsPage({ globalSearch, onGlobalSearchChange }) {
           <label className="event-select"><span className="sr-only">From</span><input type="datetime-local" value={filters.from ? new Date(filters.from).toISOString().slice(0, 16) : ''} onChange={(event) => updateFilter('from', event.target.value ? new Date(event.target.value).toISOString() : '')} /></label>
           <label className="event-select"><span className="sr-only">To</span><input type="datetime-local" value={filters.to ? new Date(filters.to).toISOString().slice(0, 16) : ''} onChange={(event) => updateFilter('to', event.target.value ? new Date(event.target.value).toISOString() : '')} /></label>
         </div>
-        <button className="event-clear-button" onClick={() => { setFilters({ event_severity: '', event_type: '', processing_status: '', source: '', asset_id: '', incident_id: '', from: '', to: '' }); onGlobalSearchChange?.(''); setPage(1) }}>Clear filters</button>
+        <button className="event-clear-button" onClick={() => { setFilters({ event_severity: '', event_type: '', processing_status: '', source: '', asset_id: '', incident_id: '', from: '', to: '' }); setPeriod('24h'); onGlobalSearchChange?.(''); setPage(1) }}>Clear filters</button>
       </div>
       <ApiState loading={loading} error={error} onRetry={() => setRefresh((value) => value + 1)} empty={!loading && !error && visible.length === 0 ? 'No security events match the current search and filters.' : null}>
         {visible.length > 0 && <><ApiTable headings={['Event ID', 'Occurred At', 'Source', 'Event Type', 'Severity', 'Processing Status', 'Correlation ID', 'Details']} className="security-event-table-scroll">{visible.map((event) => <tr key={event.id}><td className="event-id">{event.id}</td><td>{formatTimestamp(event.occurred_at)}</td><td>{event.source}</td><td>{event.event_type}</td><td><ValueBadge value={event.event_severity} className="severity" /></td><td>{event.processing_status}</td><td>{event.correlation_id}</td><td><button className="row-action" onClick={() => setSelectedId(event.id)}>View</button></td></tr>)}</ApiTable>
@@ -180,6 +246,7 @@ export function ThreatDetectionPage({ globalSearch, onGlobalSearchChange }) {
   const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState(null)
   const [refresh, setRefresh] = useState(0)
+  const { data: summary, loading: summaryLoading, error: summaryError } = useApiResource('/threats/summary', refresh)
   const [transitionError, setTransitionError] = useState(null)
   const [busy, setBusy] = useState(false)
   const path = `/threats${queryString({ page, page_size: 25, ...filters })}`
@@ -192,8 +259,15 @@ export function ThreatDetectionPage({ globalSearch, onGlobalSearchChange }) {
       setRefresh((value) => value + 1)
     } catch (requestError) { setTransitionError(requestError) } finally { setBusy(false) }
   }
-  return <main className="threat-detection-main"><PageHeading title="Threat Detection" description="Threat incidents and lifecycle status returned by the backend." />
-    <section className="threat-summary-grid"><article className="threat-summary-card"><div className="threat-summary-copy"><span className="eyebrow">Total Incidents</span><strong>{data?.total ?? '—'}</strong><span>API total for current filters</span></div></article>{[['Active Threats', 'Not provided'], ['Critical Threats', 'Not provided'], ['Resolved Threats', 'Not provided']].map(([label, value]) => <article className="threat-summary-card" key={label}><div className="threat-summary-copy"><span className="eyebrow">{label}</span><strong>{value}</strong><span>Not provided as aggregate</span></div></article>)}</section>
+  return <main className="threat-detection-main"><PageHeading title="Threat Detection" description="Threat incidents, current risk, and lifecycle counts from persisted backend records." />
+    <ApiState loading={summaryLoading} error={summaryError} onRetry={() => setRefresh((value) => value + 1)}>{summary && <section className="threat-summary-grid" aria-label="Threat summary">
+      {[
+        ['Total Incidents', summary.total_incidents, 'All persisted incidents', AlertTriangle, 'cyan'],
+        ['Active Threats', summary.active_threats, 'Not in a terminal lifecycle state', Activity, 'amber'],
+        ['Critical-Risk Incidents', summary.critical_risk_incidents, 'Current risk assessment is critical', Fingerprint, 'red'],
+        ['Resolved Incidents', summary.resolved_incidents, 'Resolved, false positive, or closed', ShieldCheck, 'green'],
+      ].map(([label, value, support, Icon, tone]) => <article className={`threat-summary-card threat-summary-card--${tone}`} key={label}><div className="threat-summary-copy"><span className="eyebrow">{label}</span><strong>{value.toLocaleString()}</strong><span className="threat-summary-support">{support}</span></div><div className="threat-summary-icon"><Icon size={17} strokeWidth={1.8} /></div></article>)}
+    </section>}</ApiState>
     <section className="panel threat-log-panel"><header className="threat-log-heading"><div><h2>Threat Incidents</h2><p>Lifecycle status uses the backend's incident state machine.</p></div></header>
       <div className="threat-filter-bar"><label className="event-search"><input type="search" value={globalSearch || ''} onChange={(event) => onGlobalSearchChange?.(event.target.value)} placeholder="Search returned fields" /></label><div className="event-select-filters"><label className="event-select"><span className="sr-only">Lifecycle status</span><select value={filters.lifecycle_status} onChange={(event) => { setFilters((v) => ({ ...v, lifecycle_status: event.target.value })); setPage(1) }}><option value="">All lifecycle statuses</option>{['new', 'triaged', 'investigating', 'contained', 'recovery_in_progress', 'recovered', 'resolved', 'false_positive', 'closed'].map((value) => <option key={value}>{value}</option>)}</select></label><label className="event-select"><span className="sr-only">Threat type</span><input value={filters.threat_type} onChange={(event) => { setFilters((v) => ({ ...v, threat_type: event.target.value })); setPage(1) }} placeholder="Exact threat type" /></label></div></div>
       <ApiState loading={loading} error={error} onRetry={() => setRefresh((value) => value + 1)} empty={!loading && !error && items.length === 0 ? 'No threat incidents match the current filters.' : null}>{items.length > 0 && <><ApiTable headings={['Incident', 'Threat Type', 'Asset', 'Affected Asset IDs', 'Detected At', 'Lifecycle Status', 'Details']} className="threat-table-scroll">{items.map((item) => <tr key={item.id}><td><strong>{item.title}</strong><small className="threat-id">{item.id}</small></td><td>{item.threat_type}</td><td>{item.asset_id}</td><td>{item.affected_asset_ids.join(', ')}</td><td>{formatTimestamp(item.detected_at)}</td><td>{item.lifecycle_status}</td><td><button className="row-action" onClick={() => { setSelectedId(item.id); setTransitionError(null) }}>View</button></td></tr>)}</ApiTable><div className="event-pagination"><span>Page {data.page} · {data.total} incidents</span><button disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button><button disabled={page * data.page_size >= data.total} onClick={() => setPage(page + 1)}>Next</button></div></>}</ApiState>
@@ -210,7 +284,7 @@ export function RiskAnalysisPage({ globalSearch = '' }) {
   const history = [...rows].reverse().map((row) => ({ time: formatTimestamp(row.assessed_at), score: row.score }))
   const assets = [...new Set(rows.map((row) => row.asset_id))]
   return <main className="risk-analysis-main"><PageHeading title="Risk Analysis" description="Risk assessments and contributing factors as actually returned by the API." />
-    <section className="risk-summary-grid"><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Latest Risk Score</span><strong>{latest ? `${latest.score} / 100` : 'Not provided'}</strong><span>{latest?.risk_level || 'No assessments returned'}</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Assessments</span><strong>{data?.total ?? '—'}</strong><span>Total returned by API</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Latest Assessment</span><strong>{latest ? formatTimestamp(latest.assessed_at) : 'Not provided'}</strong><span>Backend assessment timestamp</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Assets Represented</span><strong>{assets.length || '—'}</strong><span>In the loaded assessment page only</span></div></article></section>
+    <section className="risk-summary-grid"><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Latest Risk Score</span><strong>{latest ? `${latest.score} / 100` : 'No records'}</strong><span>{latest?.risk_level || 'No assessments returned'}</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Assessments</span><strong>{data?.total ?? '—'}</strong><span>Total returned by API</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Latest Assessment</span><strong>{latest ? formatTimestamp(latest.assessed_at) : 'No records'}</strong><span>Backend assessment timestamp</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Assets Represented</span><strong>{assets.length || '—'}</strong><span>In the loaded assessment page only</span></div></article></section>
     <div className="risk-overview-grid"><section className="panel risk-score-panel"><header className="risk-section-heading"><div><h2>Latest Risk Assessment</h2><p>One backend assessment; no aggregate score is inferred.</p></div>{latest && <span className={`severity severity--${statusClass(latest.risk_level)}`}>{latest.risk_level}</span>}</header><div className="api-risk-latest">{latest ? <><strong>{latest.score}</strong><span>/ 100 · assessment {latest.id}</span><dl className="event-detail-grid"><ApiDetail label="Incident ID" value={latest.incident_id} /><ApiDetail label="Asset ID" value={latest.asset_id} /><ApiDetail label="Confidence" value={latest.confidence} /><ApiDetail label="Status" value={latest.status} /><ApiDetail label="Model version" value={latest.model_version} /><ApiDetail label="Policy version" value={latest.policy_version} /></dl></> : <div className="api-unavailable">No assessment records returned.</div>}</div></section>
       <section className="panel risk-history-panel"><header className="risk-section-heading"><div><h2>Risk Assessment History</h2><p>Scores from the loaded API page, ordered by assessment time.</p></div></header>{history.length > 1 ? <div className="risk-history-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={history}><CartesianGrid vertical={false} stroke="#30343d" strokeDasharray="2 5" /><XAxis dataKey="time" /><YAxis domain={[0, 100]} /><Tooltip /><Line dataKey="score" stroke="#09c7d8" dot={false} /></LineChart></ResponsiveContainer></div> : <div className="api-unavailable">At least two assessments are required for a history chart.</div>}</section></div>
     <section className="panel risk-table-panel"><header className="risk-section-heading"><div><h2>Risk Assessments</h2><p>Factors are displayed in the form supplied by the backend.</p></div></header><ApiState loading={loading} error={error} empty={!loading && !error && visible.length === 0 ? 'No risk assessments match the current search.' : null}>{visible.length > 0 && <ApiTable headings={['Assessment ID', 'Incident ID', 'Asset ID', 'Score', 'Risk Level', 'Status', 'Assessed At', 'Factors', 'Correlation ID']} className="risk-table-scroll">{visible.map((row) => <tr key={row.id}><td>{row.id}</td><td>{row.incident_id}</td><td>{row.asset_id}</td><td>{row.score}</td><td>{row.risk_level}</td><td>{row.status}</td><td>{formatTimestamp(row.assessed_at)}</td><td>{row.factors.length ? displayValue(row.factors) : 'None provided'}</td><td>{row.correlation_id}</td></tr>)}</ApiTable>}</ApiState></section>
@@ -259,7 +333,7 @@ export function BackupsPage({ globalSearch = '' }) {
   }
   const count = (predicate) => items.filter(predicate).length
   return <main className="backups-main"><PageHeading title="Backups" description="Backend backup metadata, verification state, and recovery eligibility." actions={<button className="toolbar-button" onClick={() => setRefresh((value) => value + 1)}>Refresh</button>} />
-    <section className="backup-summary-grid"><article className="backup-summary-card"><div className="backup-summary-copy"><span className="eyebrow">Total Backups</span><strong>{data?.total ?? '—'}</strong><span>Backend total</span></div></article><article className="backup-summary-card"><div className="backup-summary-copy"><span className="eyebrow">Verified In Loaded Page</span><strong>{count((item) => item.verified)}</strong><span>Backend eligibility assessment</span></div></article><article className="backup-summary-card"><div className="backup-summary-copy"><span className="eyebrow">Recovery Eligible In Loaded Page</span><strong>{count((item) => item.recovery_eligible)}</strong><span>Backend-confirmed</span></div></article><article className="backup-summary-card"><div className="backup-summary-copy"><span className="eyebrow">Additional Summary Metrics</span><strong>Not provided</strong><span>Not fabricated</span></div></article></section>
+    <section className="backup-summary-grid"><article className="backup-summary-card"><div className="backup-summary-copy"><span className="eyebrow">Total Backups</span><strong>{data?.total ?? '—'}</strong><span>Backend total</span></div></article><article className="backup-summary-card"><div className="backup-summary-copy"><span className="eyebrow">Verified In Loaded Page</span><strong>{count((item) => item.verified)}</strong><span>Backend eligibility assessment</span></div></article><article className="backup-summary-card"><div className="backup-summary-copy"><span className="eyebrow">Recovery Eligible In Loaded Page</span><strong>{count((item) => item.recovery_eligible)}</strong><span>Backend-confirmed</span></div></article><article className="backup-summary-card"><div className="backup-summary-copy"><span className="eyebrow">Not Recovery Eligible · Loaded Page</span><strong>{count((item) => !item.recovery_eligible)}</strong><span>Backend eligibility assessment</span></div></article></section>
     <ActionRequestApprovalPanel actionTypes={['protect_backup']} refresh={refresh} onChanged={() => setRefresh((value) => value + 1)} />
     <section className="panel backup-repository-panel"><header className="backup-section-heading"><div><h2>Backup Repository</h2><p>Actual backend lifecycle, protection, verification, and eligibility fields.</p></div></header>{actionState.message && <p className="api-note" role="status">{actionState.message}</p>}{actionState.error && <ApiState error={actionState.error} />}
       <ApiState loading={loading} error={error} onRetry={() => setRefresh((value) => value + 1)} empty={!loading && !error && filtered.length === 0 ? 'No backups match the current search.' : null}>{filtered.length > 0 && <ApiTable headings={['Backup ID', 'Asset ID', 'Type', 'Size', 'Created', 'Lifecycle', 'Protection', 'Verified', 'Recovery Eligible', 'Actions']} className="backup-table-scroll">{filtered.map((item) => <tr key={item.backup_id}><td className="backup-id">{item.backup_id}</td><td>{item.asset_id}</td><td>{displayValue(item.backup_type)}</td><td>{formatBytes(item.size_bytes)}</td><td>{formatTimestamp(item.created_at)}</td><td>{item.lifecycle_status}</td><td>{item.protection_status}</td><td>{String(item.verified)}</td><td>{String(item.recovery_eligible)}{item.eligibility_reasons.length > 0 && <small>{item.eligibility_reasons.join('; ')}</small>}</td><td><button className="row-action" onClick={() => setSelectedId(item.backup_id)}>Details</button> <button className="backup-verify-row" disabled={actionState.busy} onClick={() => requestVerification(item.backup_id)}>Request verification</button></td></tr>)}</ApiTable>}</ApiState>
@@ -281,8 +355,8 @@ function IsolationAssetRow({ asset, busy, onSelect, onRequestIsolation, onReques
   const mayRequestRelease = state === 'isolated' && data.active_isolation_action_id
   return <tr>
     <td>{asset.hostname}</td><td>{asset.id}</td><td>{displayValue(asset.asset_type)}</td><td>{displayValue(asset.network_segment)}</td>
-    <td>{loading ? 'Loading…' : error ? 'Unavailable' : state || 'Not provided'}{data?.execution_status ? ` · ${data.execution_status}` : ''}</td>
-    <td>{data?.active_isolation_action_id || 'Not provided'}</td>
+    <td>{loading ? 'Loading…' : error ? 'Unavailable' : state || 'No state returned'}{data?.execution_status ? ` · ${data.execution_status}` : ''}</td>
+    <td>{data?.active_isolation_action_id || 'None'}</td>
     <td><button className="row-action" onClick={() => onSelect(asset)}>Details</button>{mayRequestIsolation && <button className="isolation-row-action" disabled={busy} onClick={() => onRequestIsolation(asset)}>Request isolation</button>}{mayRequestRelease && <button className="isolation-row-action" disabled={busy} onClick={() => onRequestRelease(data.active_isolation_action_id)}>Request release</button>}{!error && !loading && !mayRequestIsolation && !mayRequestRelease && <span>Request in progress / no action</span>}</td>
   </tr>
 }
@@ -296,6 +370,7 @@ export function SystemIsolationPage({ globalSearch = '' }) {
   const { data: isolationData, loading: isolationLoading, error: isolationError } = useApiResource('/isolation?page=1&page_size=100', refresh)
   const assets = data?.items || []
   const actions = isolationData?.items || []
+  const pendingActions = actions.filter((action) => ['requested', 'awaiting_approval', 'approved', 'executing', 'release_requested'].includes(action.execution_status)).length
   const filtered = assets.filter((asset) => !globalSearch.trim() || [asset.id, asset.hostname, asset.asset_type, asset.environment, asset.network_segment].some((value) => String(value || '').toLowerCase().includes(globalSearch.trim().toLowerCase())))
   const requestIsolation = async (asset) => {
     setActionState({ busy: true, error: null, message: '' })
@@ -316,7 +391,7 @@ export function SystemIsolationPage({ globalSearch = '' }) {
   }
   return <main className="system-isolation-main"><PageHeading title="System Isolation" description="Asset state is read from backend isolation records; requests do not imply execution or success." actions={<><label>Request mode <select value={mode} onChange={(event) => setMode(event.target.value)}>{['network', 'host', 'full'].map((value) => <option key={value}>{value}</option>)}</select></label><button className="toolbar-button" onClick={() => setRefresh((value) => value + 1)}>Refresh</button></>} />
     {actionState.message && <p className="api-note" role="status">{actionState.message}</p>}{actionState.error && <ApiState error={actionState.error} />}
-    <section className="isolation-summary-grid">{[['Assets loaded', data?.total ?? '—'], ['Isolation actions loaded', isolationData?.total ?? '—'], ['Current asset-state aggregate', 'Not provided'], ['Confirmed state', 'Read per asset']].map(([label, value]) => <article className="isolation-summary-card" key={label}><div className="isolation-summary-copy"><span className="eyebrow">{label}</span><strong>{value}</strong></div></article>)}</section>
+    <section className="isolation-summary-grid">{[['Assets loaded', data?.total ?? '—'], ['Isolation actions loaded', isolationData?.total ?? '—'], ['Pending actions · loaded page', pendingActions], ['Confirmed state', 'Read per asset']].map(([label, value]) => <article className="isolation-summary-card" key={label}><div className="isolation-summary-copy"><span className="eyebrow">{label}</span><strong>{value}</strong></div></article>)}</section>
     <section className="panel isolation-table-panel"><header className="isolation-section-heading"><div><h2>Assets &amp; Isolation Actions</h2><p>Current isolation state comes from each asset's backend state endpoint.</p></div></header><ApiState loading={loading} error={error} onRetry={() => setRefresh((value) => value + 1)} empty={!loading && !error && filtered.length === 0 ? 'No assets match the current search.' : null}>{filtered.length > 0 && <ApiTable headings={['Asset', 'Asset ID', 'Type', 'Network Segment', 'Confirmed Isolation State', 'Action ID', 'Actions']} className="isolation-table-scroll">{filtered.map((asset) => <IsolationAssetRow key={asset.id} asset={asset} busy={actionState.busy} onSelect={setSelectedAsset} onRequestIsolation={requestIsolation} onRequestRelease={requestRelease} />)}</ApiTable>}</ApiState><footer className="isolation-table-footer">Requests enter backend approval/execution workflow. Only component results change confirmed isolation state.</footer></section>
     <section className="panel isolation-activity-panel"><header className="isolation-section-heading"><div><h2>Recent Isolation Actions</h2><p>Backend actions only; no synthetic activity records.</p></div></header><ApiState loading={isolationLoading} error={isolationError} onRetry={() => setRefresh((value) => value + 1)} empty={!isolationLoading && !isolationError && actions.length === 0 ? 'No isolation actions returned.' : null}>{actions.length > 0 && <ApiTable headings={['Action ID', 'Asset ID', 'Operation', 'Execution Status', 'Network State', 'Requested At', 'Correlation ID']}>{actions.map((action) => <tr key={action.isolation_action_id}><td>{action.isolation_action_id}</td><td>{action.asset_id}</td><td>{action.operation}</td><td>{action.execution_status}</td><td>{displayValue(action.network_state)}</td><td>{formatTimestamp(action.requested_at)}</td><td>{action.correlation_id}</td></tr>)}</ApiTable>}</ApiState></section>
     <ActionRequestApprovalPanel actionTypes={['isolate', 'release_isolation']} refresh={refresh} onChanged={() => setRefresh((value) => value + 1)} />
@@ -338,6 +413,7 @@ export function RecoveryPage({ globalSearch = '' }) {
   const { data: backups, loading: backupsLoading, error: backupsError } = useApiResource('/backups?page=1&page_size=100', refresh)
   const jobItems = (jobs?.items || []).filter((job) => !globalSearch.trim() || [job.id, job.asset_id, job.incident_id, job.backup_id, job.job_status, job.correlation_id].some((value) => String(value || '').toLowerCase().includes(globalSearch.trim().toLowerCase())))
   const backupItems = (backups?.items || []).filter((backup) => !globalSearch.trim() || [backup.backup_id, backup.asset_id, backup.lifecycle_status, backup.eligibility_reasons].some((value) => String(value || '').toLowerCase().includes(globalSearch.trim().toLowerCase())))
+  const inProgressJobs = (jobs?.items || []).filter((job) => ['queued', 'restoring', 'scanning', 'cutover_in_progress'].includes(job.job_status)).length
   const [incidents, setIncidents] = useState([])
   const [assets, setAssets] = useState([])
   const [selectedIncident, setSelectedIncident] = useState('')
@@ -353,9 +429,10 @@ export function RecoveryPage({ globalSearch = '' }) {
       .catch((loadError) => { if (loadError.name !== 'AbortError') setRequestState((current) => ({ ...current, error: loadError })) })
     return () => controller.abort()
   }, [refresh])
+  const incidentMatchesSelectedBackup = incidents.some((incident) => incident.id === selectedIncident && (incident.asset_id === selectedBackup?.asset_id || incident.affected_asset_ids?.includes(selectedBackup?.asset_id)))
   const requestRecovery = async () => {
     const asset = assets.find((item) => item.id === selectedBackup?.asset_id)
-    if (!selectedIncident || !selectedBackup || !selectedVerification || !asset) return
+    if (!selectedIncident || !selectedBackup || !selectedVerification || !asset || !incidentMatchesSelectedBackup) return
     setRequestState({ busy: true, error: null, message: '' })
     try {
       const request = await api.post('/action-requests', { action_type: 'recover', asset_id: asset.id, incident_id: selectedIncident, backup_id: selectedBackup.backup_id, verification_id: selectedVerification })
@@ -376,8 +453,9 @@ export function RecoveryPage({ globalSearch = '' }) {
     }
   }
   return <main className="recovery-main"><PageHeading title="Recovery" description="Recovery jobs and backend-confirmed backup eligibility; execution remains component-controlled." actions={<button className="toolbar-button" onClick={() => setRefresh((value) => value + 1)}>Refresh</button>} />
-    <section className="recovery-summary-grid"><article className="recovery-summary-card"><div className="recovery-summary-copy"><span className="eyebrow">Recovery Jobs</span><strong>{jobs?.total ?? '—'}</strong><span>Backend total</span></div></article><article className="recovery-summary-card"><div className="recovery-summary-copy"><span className="eyebrow">Eligible Backups Loaded</span><strong>{backupItems.filter((item) => item.recovery_eligible).length}</strong><span>Backend-confirmed only</span></div></article><article className="recovery-summary-card"><div className="recovery-summary-copy"><span className="eyebrow">Other Metrics</span><strong>Not provided</strong><span>No fabricated success states</span></div></article></section>
-    <section className="panel recovery-plan-panel"><header className="recovery-section-heading"><div><h2>Recovery Workflow</h2><p>ActionRequest → approval → validation → RecoveryJob → dispatch → trusted component result.</p></div></header><p className="api-note">Recovery completion, scan results, and cutover status are never set by the frontend.</p><div className="api-recovery-request"><label>Incident<select value={selectedIncident} onChange={(event) => setSelectedIncident(event.target.value)}><option value="">Select incident</option>{incidents.map((incident) => <option key={incident.id} value={incident.id}>{incident.title} · {incident.lifecycle_status}</option>)}</select></label><label>Eligible backup<select value={selectedBackup?.backup_id || ''} onChange={(event) => { const backup = backupItems.find((item) => item.backup_id === event.target.value); setSelectedBackup(backup || null); setSelectedVerification('') }}><option value="">Select recovery-eligible backup</option>{backupItems.filter((backup) => backup.recovery_eligible).map((backup) => <option key={backup.backup_id} value={backup.backup_id}>{backup.backup_id} · asset {backup.asset_id}</option>)}</select></label><label>Passed verification<select value={selectedVerification} onChange={(event) => setSelectedVerification(event.target.value)}><option value="">Select verification</option>{passedVerifications.map((verification) => <option key={verification.verification_id} value={verification.verification_id}>{verification.verification_id} · completed {formatTimestamp(verification.completed_at)}</option>)}</select></label><button className="toolbar-button" disabled={requestState.busy || verificationLoading || isolationStateLoading || isolationState?.isolation_state !== 'isolated' || !selectedIncident || !selectedBackup || !selectedVerification} onClick={requestRecovery}>Create recovery request</button></div>{selectedBackup && <p className="api-note">Selected asset isolation state: {isolationStateLoading ? 'Loading…' : isolationStateError ? 'Unavailable' : isolationState?.isolation_state || 'Not provided'}. Backend validates current confirmed isolation again at the recovery gates.</p>}{verificationLoading && <ApiState loading />}{verificationError && <ApiState error={verificationError} />}{isolationStateError && <ApiState error={isolationStateError} />}{requestState.message && <p className="api-note" role="status">{requestState.message}</p>}{requestState.error && <ApiState error={requestState.error} />}</section>
+    <section className="recovery-summary-grid"><article className="recovery-summary-card"><div className="recovery-summary-copy"><span className="eyebrow">Recovery Jobs</span><strong>{jobs?.total ?? '—'}</strong><span>Backend total</span></div></article><article className="recovery-summary-card"><div className="recovery-summary-copy"><span className="eyebrow">Eligible Backups Loaded</span><strong>{backupItems.filter((item) => item.recovery_eligible).length}</strong><span>Backend-confirmed only</span></div></article><article className="recovery-summary-card"><div className="recovery-summary-copy"><span className="eyebrow">Jobs In Progress · Loaded Page</span><strong>{inProgressJobs}</strong><span>Queued or component processing</span></div></article></section>
+    <section className="panel recovery-plan-panel"><header className="recovery-section-heading"><div><h2>Recovery Workflow</h2><p>ActionRequest → approval → validation → RecoveryJob → dispatch → trusted component result.</p></div></header><p className="api-note">Recovery completion, scan results, and cutover status are never set by the frontend.</p><div className="api-recovery-request"><label>Incident<select value={selectedIncident} onChange={(event) => setSelectedIncident(event.target.value)}><option value="">Select incident</option>{(selectedBackup ? incidents.filter((incident) => incident.asset_id === selectedBackup.asset_id || incident.affected_asset_ids?.includes(selectedBackup.asset_id)) : incidents).map((incident) => <option key={incident.id} value={incident.id}>{incident.title} · {incident.lifecycle_status}</option>)}</select></label><label>Eligible backup<select value={selectedBackup?.backup_id || ''} onChange={(event) => { const backup = backupItems.find((item) => item.backup_id === event.target.value); setSelectedBackup(backup || null); setSelectedVerification(''); setSelectedIncident((current) => { const incident = incidents.find((item) => item.id === current); return incident && (incident.asset_id === backup?.asset_id || incident.affected_asset_ids?.includes(backup?.asset_id)) ? current : '' })
+      }}><option value="">Select recovery-eligible backup</option>{backupItems.filter((backup) => backup.recovery_eligible).map((backup) => <option key={backup.backup_id} value={backup.backup_id}>{backup.backup_id} · asset {backup.asset_id}</option>)}</select></label><label>Passed verification<select value={selectedVerification} onChange={(event) => setSelectedVerification(event.target.value)}><option value="">Select verification</option>{passedVerifications.map((verification) => <option key={verification.verification_id} value={verification.verification_id}>{verification.verification_id} · completed {formatTimestamp(verification.completed_at)}</option>)}</select></label><button className="toolbar-button" disabled={requestState.busy || verificationLoading || isolationStateLoading || isolationState?.isolation_state !== 'isolated' || !selectedIncident || !selectedBackup || !selectedVerification || !incidentMatchesSelectedBackup} onClick={requestRecovery}>Create recovery request</button></div>{selectedBackup && <p className="api-note">Selected asset isolation state: {isolationStateLoading ? 'Loading…' : isolationStateError ? 'Unavailable' : isolationState?.isolation_state || 'No state returned'}. Backend validates current confirmed isolation again at the recovery gates.</p>}{verificationLoading && <ApiState loading />}{verificationError && <ApiState error={verificationError} />}{isolationStateError && <ApiState error={isolationStateError} />}{requestState.message && <p className="api-note" role="status">{requestState.message}</p>}{requestState.error && <ApiState error={requestState.error} />}</section>
     <ActionRequestApprovalPanel actionTypes={['recover']} refresh={refresh} onChanged={() => setRefresh((value) => value + 1)} />
     <section className="panel recovery-jobs-panel"><header className="recovery-section-heading"><div><h2>Recovery Jobs</h2><p>Backend job lifecycle values.</p></div></header><ApiState loading={jobsLoading} error={jobsError} onRetry={() => setRefresh((value) => value + 1)} empty={!jobsLoading && !jobsError && jobItems.length === 0 ? 'No recovery jobs returned.' : null}>{jobItems.length > 0 && <ApiTable headings={['Job ID', 'Asset ID', 'Incident ID', 'Backup ID', 'Verification ID', 'Job Status', 'Cutover Status', 'Scan', 'Security Validation', 'Details']} className="restore-points-table-scroll">{jobItems.map((job) => <tr key={job.id}><td>{job.id}</td><td>{job.asset_id}</td><td>{job.incident_id}</td><td>{job.backup_id}</td><td>{job.verification_id}</td><td>{job.job_status}</td><td>{job.cutover_status}</td><td>{job.malware_scan_status}</td><td>{job.security_validation_status}</td><td><button className="row-action" onClick={() => setSelectedJob(job.id)}>Details</button></td></tr>)}</ApiTable>}</ApiState></section>
     {dispatchState.error && <ApiState error={dispatchState.error} />}
@@ -404,7 +482,7 @@ export function AuditLogsPage({ globalSearch = '', onGlobalSearchChange }) {
   const updateFilter = (key, value) => { setFilters((current) => ({ ...current, [key]: value })); setPage(1) }
   return (
     <main className="audit-logs-main"><PageHeading title="Audit Logs" description="Append-oriented audit records using fields exposed by the API." />
-    <section className="audit-summary-grid"><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Total matching records</span><strong>{data?.total ?? '—'}</strong><span>Backend pagination total</span></div></article><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Severity</span><strong>Not provided</strong><span>No severity in the audit schema</span></div></article><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Actor details</span><strong>API fields only</strong><span>actor_type and actor_id</span></div></article></section>
+    <section className="audit-summary-grid"><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Total matching records</span><strong>{data?.total ?? '—'}</strong><span>Backend pagination total</span></div></article><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Rejected · Loaded Page</span><strong>{items.filter((event) => event.result_status === 'rejected').length}</strong><span>From returned result statuses</span></div></article><article className="audit-summary-card"><div className="audit-summary-copy"><span className="eyebrow">Actor Types · Loaded Page</span><strong>{new Set(items.map((event) => event.actor_type)).size}</strong><span>Distinct values in current page</span></div></article></section>
     <section className="panel audit-log-panel"><header className="audit-section-heading"><div><h2>Audit Log</h2><p>Correlation IDs are preserved where present.</p></div></header><div className="audit-filter-bar"><label className="event-search"><input type="search" value={globalSearch} onChange={(event) => { onGlobalSearchChange?.(event.target.value); setPage(1) }} placeholder="Search loaded audit fields" /></label><div className="event-select-filters"><label className="event-select"><input value={filters.actor_type} onChange={(event) => updateFilter('actor_type', event.target.value)} placeholder="Exact actor type" /></label><label className="event-select"><input value={filters.action} onChange={(event) => updateFilter('action', event.target.value)} placeholder="Action contains" /></label><label className="event-select"><input value={filters.result_status} onChange={(event) => updateFilter('result_status', event.target.value)} placeholder="Exact result status" /></label><label className="event-select"><input value={filters.correlation_id} onChange={(event) => updateFilter('correlation_id', event.target.value)} placeholder="Correlation ID" /></label></div></div>
       <ApiState loading={loading} error={error} empty={!loading && !error && items.length === 0 ? 'No audit events match the current search and filters.' : null}>{items.length > 0 && <><ApiTable headings={['Occurred At', 'Event ID', 'Actor Type', 'Actor ID', 'Action', 'Result Status', 'Resource', 'Correlation ID', 'Details']} className="audit-table-scroll">{items.map((event) => <tr key={event.id}><td>{formatTimestamp(event.occurred_at)}</td><td>{event.id}</td><td>{event.actor_type}</td><td>{displayValue(event.actor_id)}</td><td>{event.action}</td><td>{event.result_status}</td><td>{displayValue(event.resource_type)} · {displayValue(event.resource_id)}</td><td>{event.correlation_id}</td><td><button className="row-action" onClick={() => setSelectedId(event.id)}>View</button></td></tr>)}</ApiTable><div className="event-pagination"><span>Page {data.page} · {data.total} events</span><button disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button><button disabled={page * data.page_size >= data.total} onClick={() => setPage(page + 1)}>Next</button></div></>}</ApiState>
     </section>{selectedId && <AuditDetails eventId={selectedId} onClose={() => setSelectedId(null)} />}

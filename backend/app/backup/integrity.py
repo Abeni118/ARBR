@@ -1,40 +1,13 @@
-"""
-Backup integrity verification.
 
-Provides SHA-256 hashing and tamper detection for backup files. Used by
-the recovery, audit, and reporting layers to confirm a backup has not
-been altered since it was created.
-"""
-
-from pathlib import Path
 import hashlib
 import logging
-
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Files are read in fixed-size chunks so memory usage stays low even when
-# verifying very large backups. 64 KB is a common sweet spot.
-CHUNK_SIZE_BYTES = 64 * 1024
-
 
 def calculate_sha256(file_path: str | Path) -> str:
-    """
-    Calculate the SHA-256 hash of a file.
-
-    The file is streamed in fixed-size chunks, so this is safe to call on
-    backups that are much larger than available memory.
-
-    Args:
-        file_path: Path to the file to hash.
-
-    Returns:
-        The SHA-256 digest as a lowercase hexadecimal string (64 characters).
-
-    Raises:
-        FileNotFoundError: If the file does not exist.
-        IsADirectoryError: If the path points to a directory instead of a file.
-    """
+    sha256_hash = hashlib.sha256()
     path = Path(file_path)
 
     if not path.exists():
@@ -43,74 +16,37 @@ def calculate_sha256(file_path: str | Path) -> str:
     if not path.is_file():
         raise IsADirectoryError(f"Path is not a file: {path}")
 
-    sha256 = hashlib.sha256()
+    with path.open("rb") as file:
+        for byte_block in iter(lambda: file.read(65536), b""):
+            sha256_hash.update(byte_block)
 
-    with path.open("rb") as backup_file:
-        for chunk in iter(lambda: backup_file.read(CHUNK_SIZE_BYTES), b""):
-            sha256.update(chunk)
-
-    return sha256.hexdigest()
+    return sha256_hash.hexdigest()
 
 
 def verify_backup_integrity(file_path: str | Path, stored_hash: str) -> bool:
-    """
-    Check whether a backup file still matches its trusted stored hash.
-
-    This is the main entry point used by the backup and recovery layers.
-    It never raises: any failure (missing file, unreadable path, hash
-    mismatch) is reported as ``False`` so callers can treat the backup as
-    unsafe without wrapping the call in try/except.
-
-    Args:
-        file_path: Path to the backup file to verify.
-        stored_hash: The trusted SHA-256 hash (hex string) recorded when
-            the backup was created.
-
-    Returns:
-        True if the file exists and its current hash matches ``stored_hash``.
-        False otherwise.
-    """
     try:
         current_hash = calculate_sha256(file_path)
-    except FileNotFoundError:
-        logger.warning(
-            "Backup file missing during integrity check: %s", file_path
-        )
-        return False
-    except OSError as error:
-        logger.error("Could not read backup file %s: %s", file_path, error)
+
+        if current_hash != stored_hash:
+            logger.warning(
+                f"Integrity mismatch for {file_path}: "
+                f"expected {stored_hash}, got {current_hash}"
+            )
+            return False
+
+        logger.info(f"Integrity verified for {file_path}")
+        return True
+
+    except (FileNotFoundError, IsADirectoryError) as error:
+        logger.error(f"Could not read backup file {file_path}: {error}")
         return False
 
-    if current_hash != stored_hash:
-        logger.warning(
-            "Integrity mismatch for %s: expected %s, got %s",
-            file_path,
-            stored_hash,
-            current_hash,
-        )
+    except Exception as error:
+        logger.error(f"Error verifying backup: {error}")
         return False
 
-    logger.info("Integrity verified for %s", file_path)
-    return True
+
 def calculate_directory_sha256(directory_path: str | Path) -> str:
-    """
-    Calculate a deterministic SHA-256 hash of a directory tree.
-
-    Hashes the sorted list of (relative_path, file_hash) pairs, so the
-    result depends only on directory contents — not on the order the OS
-    happens to enumerate files. This is what makes it a "backup identity":
-    the same backup always hashes to the same value.
-
-    Args:
-        directory_path: Root directory to hash.
-
-    Returns:
-        Hex digest (64 characters).
-
-    Raises:
-        FileNotFoundError: If the directory does not exist.
-        NotADirectoryError: If the path points to a file.
-    """
     root = Path(directory_path)
 
     if not root.exists():
@@ -119,15 +55,18 @@ def calculate_directory_sha256(directory_path: str | Path) -> str:
     if not root.is_dir():
         raise NotADirectoryError(f"Path is not a directory: {root}")
 
-    entries: list[tuple[str, str]] = []
+    entries = []
+
     for item in sorted(root.rglob("*")):
         if item.is_file():
-            relative = item.relative_to(root).as_posix()
-            entries.append((relative, calculate_sha256(item)))
+            relative_path = item.relative_to(root).as_posix()
+            file_hash = calculate_sha256(item)
+            entries.append((relative_path, file_hash))
 
     master = hashlib.sha256()
-    for relative, file_hash in entries:
-        master.update(relative.encode("utf-8"))
+
+    for relative_path, file_hash in entries:
+        master.update(relative_path.encode("utf-8"))
         master.update(b"\0")
         master.update(file_hash.encode("utf-8"))
         master.update(b"\0")

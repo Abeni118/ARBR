@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from app.api.common import as_utc, get_or_404, paginate
 from app.database.session import get_db
 from app.enums import IncidentLifecycleStatus
-from app.models import Asset, SecurityEvent, ThreatIncident
-from app.schemas import Page, ThreatIncidentCreate, ThreatIncidentRead
+from app.models import Asset, RiskAssessment, SecurityEvent, ThreatIncident
+from app.schemas import Page, ThreatIncidentCreate, ThreatIncidentRead, ThreatSummary
 from app.services.asset_resolution import resolve_asset
 from app.services.audit import record_phase2_audit
 from app.services.internal_auth import ComponentPrincipal, ComponentScope, require_component_scope
@@ -198,6 +198,25 @@ def mark_false_positive(
         target="false_positive",
         db=db,
         actor=current_user,
+    )
+
+
+@router.get("/summary", response_model=ThreatSummary)
+def threat_summary(db: Session = Depends(get_db)):
+    """Return incident aggregates from persisted lifecycle and current-risk records."""
+    terminal_statuses = ("resolved", "false_positive", "closed")
+    return ThreatSummary(
+        total_incidents=db.query(ThreatIncident).count(),
+        active_threats=db.query(ThreatIncident)
+        .filter(ThreatIncident.lifecycle_status.notin_(terminal_statuses))
+        .count(),
+        critical_risk_incidents=db.query(ThreatIncident)
+        .join(RiskAssessment, ThreatIncident.current_risk_assessment_id == RiskAssessment.id)
+        .filter(RiskAssessment.risk_level == "CRITICAL")
+        .count(),
+        resolved_incidents=db.query(ThreatIncident)
+        .filter(ThreatIncident.lifecycle_status.in_(terminal_statuses))
+        .count(),
     )
 
 

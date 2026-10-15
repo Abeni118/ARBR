@@ -16,7 +16,7 @@
 .event-page-toolbar .period-selector button { min-width: 28px; }
 .event-page-toolbar .toolbar-button { min-width: 59px; }
 
-.event-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 11px; }
+.event-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 .event-summary-card { position: relative; min-width: 0; height: 82px; padding: 11px 12px; display: flex; align-items: center; justify-content: space-between; overflow: hidden; background: var(--bg-panel); box-shadow: 0 1px 2px #060b16aa; }
 .event-summary-card::before { position: absolute; inset: 0 auto 0 0; width: 2px; content: ''; background: var(--tone); }
 .event-summary-card--cyan { --tone: #08c4d7; }
@@ -40,11 +40,11 @@
 .security-log-heading { min-height: 54px; padding: 10px 13px 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .live-indicator { display: inline-flex; align-items: center; gap: 6px; color: #9ea7b4; font-family: var(--mono); font-size: 7px; white-space: nowrap; }
 .event-filter-bar { padding: 9px 11px 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; border-top: 1px solid #30333a; border-bottom: 1px solid #30333a; background: #20242d; }
-.event-search { height: 27px; min-width: 180px; flex: 1 1 190px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border: 1px solid #343c4c; color: #8e99aa; background: #171f31; }
+.event-search { height: 27px; min-width: 180px; flex: 1 1 190px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border: 1px solid rgba(61, 73, 89, 0.95); color: #8e99aa; background: rgba(17, 24, 36, 0.98); }
 .event-search input { width: 100%; min-width: 0; border: 0; outline: none; color: #d7dfeb; background: transparent; font-size: 8px; }
 .event-search input::placeholder { color: #828c9e; }
 .event-select-filters { display: flex; gap: 6px; flex-wrap: wrap; }
-.event-select { position: relative; height: 27px; min-width: 92px; display: inline-flex; align-items: center; border: 1px solid #343c4c; background: #171f31; }
+.event-select { position: relative; height: 27px; min-width: 92px; display: inline-flex; align-items: center; border: 1px solid rgba(61, 73, 89, 0.95); background: rgba(17, 24, 36, 0.98); }
 .event-select select { width: 100%; height: 100%; padding: 0 22px 0 8px; border: 0; appearance: none; color: #c1cad6; background: transparent; outline: none; font-size: 8px; cursor: pointer; }
 .event-select select option { color: #e0e6ee; background: #171f31; }
 .event-select > svg { position: absolute; right: 6px; pointer-events: none; color: #8894a5; }

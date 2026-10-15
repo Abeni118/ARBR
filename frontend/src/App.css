@@ -10,23 +10,23 @@
   font-weight: 400;
   --bg-deep: #0c152d;
   --bg-main: #101a34;
-  --bg-panel: #17243a;
-  --bg-panel-2: #1b2941;
-  --border: #2d3b53;
+  --bg-panel: #24272f;
+  --bg-panel-2: #20242d;
+  --border: #303644;
   --muted: #aab6c7;
   --cyan: #06c4d8;
   --red: #ef3e4c;
   --green: #23c879;
   --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  --space-page: clamp(16px, 2.2vw, 28px);
-  --space-section: 20px;
-  --text-caption: 12px;
-  --text-body: 14px;
-  --text-section: 16px;
-  --text-page-title: clamp(24px, 2.1vw, 32px);
-  --radius-control: 6px;
-  --radius-panel: 9px;
-  --shadow-panel: 0 8px 24px #050b1680;
+  --space-page: clamp(15px, 2.4vw, 27px);
+  --space-section: 15px;
+  --text-caption: 8px;
+  --text-body: 9px;
+  --text-section: 13px;
+  --text-page-title: clamp(21px, 2.7vw, 29px);
+  --radius-control: 2px;
+  --radius-panel: 0px;
+  --shadow-panel: 0 1px 2px #060b16aa;
 }
 
 .api-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
@@ -376,48 +376,70 @@ tbody tr:hover { background: #292d36; }
   font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
   font-size: var(--text-body);
   line-height: 1.5;
+  background: linear-gradient(180deg, #0c1529 0%, #0c1529 100%);
 }
 .app-shell .sidebar {
   width: clamp(220px, 19vw, 252px);
   flex-basis: clamp(220px, 19vw, 252px);
-  padding: 20px 14px 16px;
+  padding: 16px 10px 14px;
+  background: linear-gradient(180deg, #0d1a2c 0%, #0f1d30 100%);
+  border-right: 1px solid rgba(44, 57, 75, 0.9);
+  box-shadow: inset -1px 0 0 rgba(81, 104, 135, 0.18);
 }
 .app-shell .sidebar--collapsed {
   width: 68px;
   flex-basis: 68px;
   padding-inline: 9px;
 }
-.app-shell .brand { min-height: 46px; gap: 11px; padding: 0 7px 17px; }
+.app-shell .brand { min-height: 42px; gap: 11px; padding: 0 7px 16px; }
 .app-shell .brand-mark { width: 25px; height: 25px; border-radius: 6px; }
 .app-shell .brand-name { font-size: 12px; line-height: 1.35; }
 .app-shell .sidebar-toggle { display: grid; }
 .app-shell .side-nav { gap: 3px; padding-top: 18px; }
 .app-shell .nav-link {
   position: relative;
-  min-height: 40px;
+  min-height: 34px;
   gap: 11px;
   padding: 8px 10px;
-  border-radius: var(--radius-control);
-  font-size: 13px;
+  border-radius: 4px;
+  font-size: 12px;
   line-height: 1.35;
+  color: #d3dae5;
 }
 .app-shell .nav-link svg { width: 17px; height: 17px; }
 .app-shell .sidebar .nav-link[aria-current="page"] {
   color: #f3fbfc;
-  background: #17303c;
-  box-shadow: inset 3px 0 var(--cyan);
+  background: rgba(31, 42, 56, 0.92);
+  box-shadow: inset 2px 0 0 var(--cyan);
+  border: 1px solid rgba(102, 128, 160, 0.12);
 }
 .app-shell .sidebar .nav-link[aria-current="page"] svg { color: var(--cyan); }
 .app-shell .sidebar-user { padding: 14px 5px 2px; gap: 10px; }
 .app-shell .user-avatar { width: 32px; height: 32px; font-size: 12px; }
 .app-shell .user-copy strong { font-size: 12px; }
 .app-shell .user-copy span, .app-shell .sidebar-password-link { font-size: 11px; }
-.app-shell .topbar { height: 60px; flex-basis: 60px; padding-inline: clamp(18px, 2.5vw, 34px); }
-.app-shell .breadcrumbs { gap: 10px; font-size: 13px; }
+.app-shell .topbar {
+  height: 52px;
+  flex-basis: 52px;
+  padding-inline: clamp(18px, 2.5vw, 34px);
+  background: rgba(12, 20, 35, 0.96);
+  border-bottom: 1px solid rgba(47, 63, 80, 0.9);
+}
+.app-shell .breadcrumbs { gap: 10px; font-size: 12px; }
 .app-shell .breadcrumbs strong { font-weight: 650; }
 .app-shell .topbar-tools { gap: 14px; }
-.app-shell .search-box { width: clamp(180px, 21vw, 280px); height: 36px; padding-inline: 10px; border: 1px solid #303b50; border-radius: var(--radius-control); }
+.app-shell .search-box {
+  width: clamp(180px, 21vw, 280px);
+  height: 32px;
+  padding-inline: 10px;
+  border: 1px solid rgba(58, 73, 92, 0.9);
+  border-radius: 4px;
+  background: rgba(23, 33, 52, 0.94);
+}
 .app-shell .search-box input { font-size: 12px; }
+.app-shell .notification-button { border-radius: 4px; }
+.app-shell .notification-dot { box-shadow: 0 0 0 2px #0c1529; }
+.app-shell .search-box kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 14px; height: 14px; padding: 0 4px; border: 1px solid rgba(96, 111, 129, 0.7); border-radius: 2px; color: #adbac5; background: rgba(17, 24, 38, 0.6); }
 .app-shell .notification-button { padding: 7px; }
 .app-shell .notification-button svg { width: 18px; height: 18px; }
 .app-shell :is(.dashboard-main, .security-events-main, .threat-detection-main, .risk-analysis-main, .backups-main, .system-isolation-main, .recovery-main, .audit-logs-main, .settings-main) {
@@ -653,6 +675,203 @@ tbody tr:hover { background: #292d36; }
   .app-shell .settings-section-nav a { font-size: 11px; }
 }
 .app-shell a:hover { text-decoration: none; }
+
+/* ARBR reference shell scale, applied consistently to the real API-backed pages. */
+.app-shell { background: #101a34; }
+.app-shell .main-shell { background: #101a34; }
+.app-shell .sidebar {
+  width: clamp(138px, 18vw, 250px);
+  flex-basis: clamp(138px, 18vw, 250px);
+  min-height: 100vh;
+  padding: 14px 10px 12px;
+  background: #101a34;
+  border-right: 1px solid #263047;
+}
+.app-shell .sidebar--collapsed { width: 61px; flex-basis: 61px; padding-inline: 9px; }
+.app-shell .brand { min-height: 28px; gap: 9px; padding: 0 5px 19px; }
+.app-shell .brand-mark { width: 17px; height: 18px; border-radius: 2px; }
+.app-shell .brand-name { font-size: 9px; line-height: 1.45; }
+.app-shell .side-nav { gap: 1px; padding-top: 19px; }
+.app-shell .nav-link { min-height: 31px; gap: 10px; padding: 6px 9px; border-radius: 2px; font-size: 11px; }
+.app-shell .nav-link svg { width: 14px; height: 14px; }
+.app-shell .sidebar .nav-link[aria-current="page"] {
+  color: #fff;
+  background: #252b37;
+  border: 0;
+  box-shadow: inset 2px 0 var(--cyan);
+}
+.app-shell .sidebar .nav-link[aria-current="page"] svg { color: #d4e0ef; }
+.app-shell .sidebar-user { padding: 12px 6px 1px; gap: 8px; }
+.app-shell .user-avatar { width: 24px; height: 24px; font-size: 9px; }
+.app-shell .user-copy strong { font-size: 9px; }
+.app-shell .user-copy span, .app-shell .sidebar-password-link { font-size: 8px; }
+.app-shell .topbar {
+  height: 36px;
+  flex-basis: 36px;
+  padding-inline: 17px;
+  background: #101a34;
+  border-bottom: 1px solid #263149;
+}
+.app-shell .breadcrumbs { gap: 8px; font-size: 9px; }
+.app-shell .breadcrumbs strong { font-weight: 500; }
+.app-shell .topbar-tools { gap: 15px; }
+.app-shell .search-box {
+  width: clamp(110px, 18vw, 220px);
+  height: 24px;
+  padding-inline: 7px;
+  border: 0;
+  border-radius: 0;
+  background: #1a243a;
+}
+.app-shell .search-box input { min-height: 0; font-size: 8px; }
+.app-shell .search-box kbd { display: none; }
+.app-shell .notification-button { padding: 4px; }
+.app-shell .notification-button svg { width: 15px; height: 15px; }
+.app-shell :is(.dashboard-main, .security-events-main, .threat-detection-main, .risk-analysis-main, .backups-main, .system-isolation-main, .recovery-main, .audit-logs-main, .settings-main) {
+  width: 100%;
+  max-width: 1600px;
+  padding: var(--space-page) var(--space-page) 12px;
+  gap: 15px;
+}
+.app-shell .api-page-heading { min-height: 40px; align-items: center; gap: 12px; }
+.app-shell .api-page-heading h1 {
+  color: #edf1f8;
+  font-family: var(--mono);
+  font-size: var(--text-page-title);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -.8px;
+  text-transform: uppercase;
+}
+.app-shell .api-page-heading p { margin-top: 4px; font-size: 9px; line-height: 1.4; }
+.app-shell :is(.panel, .metric-card, .event-summary-card, .threat-summary-card, .risk-summary-card, .backup-summary-card, .isolation-summary-card, .recovery-summary-card, .audit-summary-card) {
+  border-radius: 0;
+  box-shadow: 0 1px 2px #060b16aa;
+}
+.app-shell :is(.panel-heading, .chart-heading, .events-heading, .security-log-heading, .threat-log-heading, .risk-section-heading, .backup-section-heading, .isolation-section-heading, .recovery-section-heading, .audit-section-heading, .settings-section-heading) h2 {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -.2px;
+  text-transform: uppercase;
+}
+.app-shell :is(.panel-heading, .chart-heading, .events-heading, .security-log-heading, .threat-log-heading, .risk-section-heading, .backup-section-heading, .isolation-section-heading, .recovery-section-heading, .audit-section-heading, .settings-section-heading) p {
+  font-size: 8px;
+  line-height: 1.4;
+}
+.app-shell .eyebrow { font-size: 7px; line-height: 1.3; letter-spacing: .45px; }
+.app-shell :is(.toolbar-button, .text-button, .action-button, .row-action, .event-clear-button, .event-pagination button, .recovery-start-row, .isolation-row-action, .backup-verify-row) {
+  min-height: 24px;
+  border-radius: 2px;
+  font-size: 8px;
+  line-height: 1.3;
+}
+.app-shell .toolbar-button { height: 24px; padding: 0 8px; }
+.app-shell .row-action { width: 23px; min-width: 23px; height: 23px; padding: 0; }
+.app-shell :is(input, select, textarea) { min-height: 24px; border-radius: 2px; font-size: 8px; line-height: 1.3; }
+.app-shell :is(.event-search, .event-select) { min-height: 27px; height: 27px; border-radius: 0; }
+.app-shell :is(.event-search input, .event-select input, .event-select select, .api-page-actions input, .api-page-actions select) { min-height: 0; height: 100%; font-size: 8px; }
+.app-shell .api-state { min-height: 72px; padding: 14px; font-size: 10px; line-height: 1.4; }
+.app-shell .api-unavailable { min-height: 100px; padding: 18px; font-size: 10px; line-height: 1.4; }
+.app-shell .api-note { padding: 9px 11px; border-radius: 0; font-size: 9px; line-height: 1.5; }
+.app-shell .api-table-scroll table { min-width: 780px; }
+.app-shell :is(.api-table-scroll, .table-scroll, .security-event-table-scroll, .threat-table-scroll, .risk-table-scroll, .backup-table-scroll, .isolation-table-scroll, .restore-points-table-scroll, .audit-table-scroll) th {
+  height: 29px;
+  padding-inline: 8px;
+  font-size: 7px;
+  line-height: 1.3;
+}
+.app-shell :is(.api-table-scroll, .table-scroll, .security-event-table-scroll, .threat-table-scroll, .risk-table-scroll, .backup-table-scroll, .isolation-table-scroll, .restore-points-table-scroll, .audit-table-scroll) td {
+  height: 35px;
+  padding: 5px 8px;
+  font-size: 8px;
+  line-height: 1.35;
+}
+.app-shell :is(.event-id, .event-time, .backup-id, .risk-row-id, .threat-id, .audit-id) { font-size: 8px; }
+.app-shell :is(.event-status-badge, .threat-status-badge, .risk-state, .backup-status-badge, .isolation-status-badge, .recovery-status-badge, .audit-status-badge, .severity) {
+  padding: 3px 5px;
+  border-radius: 0;
+  font-size: 6px;
+  line-height: 1.15;
+}
+.app-shell :is(.status-footer, .security-events-footer, .threat-page-footer, .risk-page-footer, .backups-page-footer, .isolation-page-footer, .recovery-page-footer, .audit-page-footer, .settings-page-footer, .backup-table-footer, .isolation-table-footer, .recovery-table-footer, .audit-table-footer) {
+  font-size: 7px;
+  line-height: 1.4;
+}
+.app-shell :is(.event-summary-support, .threat-summary-support, .risk-summary-support, .backup-summary-support, .isolation-summary-support, .recovery-summary-support, .audit-summary-support) { font-size: 7px; line-height: 1.35; }
+.app-shell .event-filter-bar,
+.app-shell :is(.threat-filter-bar, .audit-filter-bar, .event-pagination, .pagination-controls) { background-color: #20242d; }
+.app-shell :is(thead, th) { background-color: #22252c; }
+.app-shell .settings-card-icon, .app-shell .profile-info-icon { border-radius: 2px; }
+.app-shell .settings-card-content > .settings-value-row { padding-block: 7px; }
+.app-shell .settings-card-content > .settings-value-row dt,
+.app-shell .settings-card-content > .settings-value-row dd { font-size: 9px; }
+.app-shell .settings-card-description,
+.app-shell .settings-readonly-note,
+.app-shell .settings-unavailable-state p { font-size: 9px; }
+.app-shell .settings-section-nav a { border-radius: 2px; font-size: 9px; }
+.app-shell .profile-hero { padding: 15px; }
+.app-shell .profile-avatar { width: 48px; height: 48px; font-size: 17px; }
+.app-shell .profile-hero-copy h2 { font-size: 16px; }
+.app-shell .profile-hero-copy p,
+.app-shell .profile-card-heading p,
+.app-shell .profile-note { font-size: 9px; }
+.app-shell .profile-card-heading { padding: 12px 13px; }
+.app-shell .profile-card-heading h2 { font-size: 12px; }
+.app-shell .profile-card-content { padding: 12px 13px; }
+.app-shell .profile-details dt,
+.app-shell .profile-details dd { font-size: 9px; }
+
+@media (max-width: 1024px) {
+  .app-shell .sidebar:not(.sidebar--collapsed) {
+    width: clamp(138px, 18vw, 250px);
+    flex-basis: clamp(138px, 18vw, 250px);
+    padding-inline: 10px;
+  }
+  .app-shell .sidebar:not(.sidebar--collapsed) :is(.brand-name, .nav-link span, .nav-chevron, .sidebar-password-link) { display: initial; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .user-copy { display: grid; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .nav-link { justify-content: flex-start; padding-inline: 9px; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .sidebar-toggle { display: none; }
+}
+@media (min-width: 701px) and (max-width: 1024px) {
+  .app-shell .sidebar:not(.sidebar--collapsed) .brand-name { display: block; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .nav-link span { display: inline; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .nav-chevron { display: block; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .user-copy { display: grid; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .sidebar-password-link { display: inline; }
+}
+@media (max-width: 700px) {
+  .app-shell .sidebar:not(.sidebar--collapsed) { width: 56px; flex-basis: 56px; padding: 12px 6px; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .brand { justify-content: center; padding: 0 0 16px; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .brand-name,
+  .app-shell .sidebar:not(.sidebar--collapsed) .nav-link span,
+  .app-shell .sidebar:not(.sidebar--collapsed) .nav-chevron,
+  .app-shell .sidebar:not(.sidebar--collapsed) .user-copy,
+  .app-shell .sidebar:not(.sidebar--collapsed) .user-chevron,
+  .app-shell .sidebar:not(.sidebar--collapsed) .sidebar-password-link { display: none; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .sidebar-toggle { display: none; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .nav-link { justify-content: center; min-height: 31px; padding: 8px 4px; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .sidebar-user { justify-content: center; padding-inline: 0; }
+  .app-shell .sidebar:not(.sidebar--collapsed) .user-avatar { display: grid; }
+  .app-shell .topbar { height: 40px; flex-basis: 40px; padding-inline: 11px; }
+  .app-shell .breadcrumbs { gap: 5px; font-size: 8px; }
+  .app-shell .breadcrumbs > span, .app-shell .breadcrumbs > svg:nth-of-type(2) { display: none; }
+  .app-shell .search-box { width: clamp(84px, 18vw, 130px); height: 24px; }
+  .app-shell .topbar-tools { gap: 7px; }
+  .app-shell :is(.dashboard-main, .security-events-main, .threat-detection-main, .risk-analysis-main, .backups-main, .system-isolation-main, .recovery-main, .audit-logs-main, .settings-main) {
+    padding: 14px 12px 10px;
+    gap: 12px;
+  }
+  .app-shell .api-page-heading { align-items: flex-start; }
+  .app-shell .api-page-heading h1 { font-size: clamp(19px, 5vw, 24px); }
+  .app-shell .api-page-heading p { font-size: 8px; }
+  .app-shell .toolbar-button { min-height: 24px; }
+}
+@media (max-width: 420px) {
+  .app-shell .search-box { width: 108px; }
+  .app-shell .breadcrumbs > strong { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+}
 
 @media (max-width: 1024px) {
   .app-shell .sidebar { width: 68px; flex-basis: 68px; padding-inline: 9px; }

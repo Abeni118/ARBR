@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 import re
-from typing import Annotated, Any, Generic, TypeVar
+from typing import Annotated, Any, Generic, Literal, TypeVar
 from uuid import UUID
 
-from pydantic import AliasChoices, AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .enums import (
     ActionExecutionStatus,
@@ -110,6 +110,84 @@ class AuthenticatedUser(APIModel):
     role: str
     display_name: str | None = None
     csrf_token: str
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    password: str = Field(min_length=12, max_length=1024)
+    display_name: str | None = Field(default=None, max_length=255)
+    role: str | None = None
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def trim_username(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def validate_register_fields(self):
+        if self.display_name is not None:
+            self.display_name = self.display_name.strip() or None
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", self.username):
+            raise ValueError("Username must contain 3–64 letters, digits, dots, underscores, or hyphens")
+        if self.role is not None and self.role != "viewer":
+            raise ValueError("Public registration does not allow selecting elevated roles; the default role is viewer")
+        return self
+
+
+class UserAccountCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    display_name: str | None = Field(default=None, max_length=255)
+    role: Literal["viewer", "analyst", "approver"]
+    initial_password: str = Field(min_length=12, max_length=1024)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def trim_username(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def normalize_account_fields(self):
+        if self.display_name is not None:
+            self.display_name = self.display_name.strip() or None
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", self.username):
+            raise ValueError("Username must contain 3–64 letters, digits, dots, underscores, or hyphens")
+        return self
+
+
+class UserAccountUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["viewer", "analyst", "approver", "admin"] | None = None
+    is_active: bool | None = None
+    display_name: str | None = Field(default=None, max_length=255)
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def trim_display_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class UserAccountRead(APIModel):
+    user_id: str
+    username: str
+    display_name: str | None
+    role: str
+    is_active: bool = True
+    created_by_user_id: str
+    created_at: UTCDateTime
+    source: str = "database"
+
+
+class AdminOverviewRead(APIModel):
+    user_counts: dict[str, int]
+    system_health: dict[str, Any]
+    security_summary: dict[str, int]
+    backup_recovery_summary: dict[str, int]
+    audit_summary: dict[str, Any]
 
 
 class RiskThresholds(APIModel):
@@ -232,6 +310,28 @@ class SecurityEventIngestResponse(APIModel):
     event: SecurityEventRead
     duplicate: bool
     correlation_id: UUID
+
+
+class SecurityEventActivityPoint(APIModel):
+    bucket_start: UTCDateTime
+    events: int = Field(ge=0)
+    critical_events: int = Field(ge=0)
+
+
+class SecurityEventSummary(APIModel):
+    total_events: int = Field(ge=0)
+    critical_events: int = Field(ge=0)
+    pending_processing_events: int = Field(ge=0)
+    events_today: int = Field(ge=0)
+    monitored_assets: int = Field(ge=0)
+    activity: list[SecurityEventActivityPoint]
+
+
+class ThreatSummary(APIModel):
+    total_incidents: int = Field(ge=0)
+    active_threats: int = Field(ge=0)
+    critical_risk_incidents: int = Field(ge=0)
+    resolved_incidents: int = Field(ge=0)
 
 
 class DashboardSummary(APIModel):
@@ -803,22 +903,16 @@ class AuditEventRead(APIModel):
 
 
 class SystemSettingsUpdate(APIModel):
+    model_config = ConfigDict(extra="forbid")
+
     risk_thresholds: RiskThresholds | None = None
-    isolation_policy: dict[str, Any] | None = None
-    backup_policy: dict[str, Any] | None = None
-    recovery_policy: dict[str, Any] | None = None
-    notification_policy: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_no_secret_fields(self):
-        for policy in (
-            self.isolation_policy,
-            self.backup_policy,
-            self.recovery_policy,
-            self.notification_policy,
-        ):
-            if policy is not None:
-                _reject_secret_fields(policy)
+        if any(getattr(self, name) is None for name in self.model_fields_set):
+            raise ValueError("Settings fields cannot be null")
+        if not self.model_fields_set:
+            raise ValueError("Provide at least one settings field to update")
         return self
 
 

@@ -34,3 +34,19 @@ SUSPICIOUS_EXTENSIONS = {
 RANSOM_NOTE_PATTERNS = (
     "readme", "decrypt", "how_to", "restore_files", "ransom",
 )
+
+# --- Backend API integration (POST /api/internal/security-events) -----------
+# Base URL of the team's FastAPI backend.
+DETECTOR_API_URL = os.getenv("DETECTOR_API_URL", "http://127.0.0.1:8000")
+# Component token with the `security_events:write` scope. It must match an entry
+# in the backend's MVP_COMPONENT_TOKENS. Never hard-code or commit it.
+DETECTOR_API_TOKEN = os.getenv("DETECTOR_API_TOKEN", "")
+# `source` value stored on every event (part of the unique key with source_event_id).
+DETECTOR_SOURCE = os.getenv("DETECTOR_SOURCE", "wazuh-detector")
+# How to tell the API which asset an event belongs to. The asset must already
+# exist: the API never creates one. Either set a fixed asset UUID...
+DETECTOR_ASSET_ID = os.getenv("DETECTOR_ASSET_ID", "")
+# ...or leave it empty and the agent name is sent as an external reference
+# (external_source / external_id) matched against registered assets.
+DETECTOR_ASSET_EXTERNAL_SOURCE = os.getenv("DETECTOR_ASSET_EXTERNAL_SOURCE", "wazuh")
+DETECTOR_API_TIMEOUT_SECONDS = float(os.getenv("DETECTOR_API_TIMEOUT_SECONDS", "5"))

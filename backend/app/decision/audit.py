@@ -1,8 +1,8 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from backend.app.decision.actions import DecisionAction
-from backend.app.decision.decision_engine import Decision
+from app.decision.actions import DecisionAction
+from app.decision.decision_engine import Decision
 
 
 @dataclass(frozen=True)
@@ -31,12 +31,26 @@ class DecisionAuditLog:
         success: bool,
         message: str,
     ) -> DecisionAudit:
+        # A Decision (see models.py) covers a list of events, so the audit
+        # record is keyed on the first triggering event. With no events
+        # (an ALLOW for a quiet system) it falls back to the decision's own id.
+        events = decision.triggering_events
+        event_id = events[0].event_id if events else decision.decision_id
+
+        # SecurityEvent has no host field; detectors report it in raw_data.
+        host_id = next(
+            (e.raw_data["host_id"] for e in events if e.raw_data.get("host_id")),
+            "unknown",
+        )
+
+        assessment = decision.risk_assessment
+
         record = DecisionAudit(
-            event_id=decision.event_id,
-            host_id=decision.host_id,
-            action=decision.action,
-            risk_level=decision.risk_level.value,
-            risk_score=decision.risk_score,
+            event_id=event_id,
+            host_id=host_id,
+            action=DecisionAction(decision.action.value),
+            risk_level=assessment.risk_level.value,
+            risk_score=assessment.risk_score,
             reason=decision.reason,
             success=success,
             message=message,

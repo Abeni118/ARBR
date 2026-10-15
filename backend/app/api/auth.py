@@ -1,24 +1,101 @@
+from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
-from app.schemas import AuthenticatedUser, ChangePasswordRequest, LoginRequest
+from app.models import UserAccount
+from app.schemas import (
+    AuditEventCreate,
+    AuthenticatedUser,
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    UserAccountRead,
+)
+from app.services.audit import record_audit_event
 from app.services.user_auth import (
     CSRF_COOKIE_NAME,
     SESSION_COOKIE_NAME,
+    UserPrincipal,
+    UserRole,
     authenticate_password,
     cookie_secure,
     change_user_password,
     get_session_csrf_token,
     get_current_user,
+    hash_password,
+    is_configured_username,
     issue_user_session,
     revoke_user_session,
     validate_login_origin,
 )
-from app.services.user_auth import UserPrincipal
 
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+
+
+@router.post("/register", response_model=UserAccountRead, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+    """Register a new user account with least-privileged viewer role."""
+    if not validate_login_origin(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "untrusted_origin", "message": "Registration request origin is not allowed."},
+        )
+
+    normalized_username = payload.username.strip().casefold()
+    if is_configured_username(normalized_username):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "username_already_exists", "message": "An account with this username already exists."},
+        )
+
+    existing = db.query(UserAccount).filter(UserAccount.username_normalized == normalized_username).first()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "username_already_exists", "message": "An account with this username already exists."},
+        )
+
+    # Always enforce the least-privileged permitted role (viewer) for self-registration
+    account = UserAccount(
+        username=payload.username.strip(),
+        username_normalized=normalized_username,
+        display_name=payload.display_name,
+        role=UserRole.VIEWER.value,
+        password_hash=hash_password(payload.password),
+        is_active=True,
+        created_by_user_id="public_registration",
+    )
+    db.add(account)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "username_already_exists", "message": "An account with this username already exists."},
+        ) from exc
+
+    record_audit_event(
+        db,
+        AuditEventCreate(
+            actor_type="user",
+            actor_id=account.user_id,
+            action="user_account.registered",
+            result_status="success",
+            resource_type="user_account",
+            resource_id=account.user_id,
+            source_component="api",
+            reason="Public user completed self-registration with least-privileged viewer role",
+            safe_metadata={"username": account.username, "role": account.role},
+            correlation_id=uuid4(),
+        ),
+    )
+    db.commit()
+    db.refresh(account)
+    return UserAccountRead.model_validate(account)
 
 
 def _authenticated_user(user: UserPrincipal, csrf_token: str) -> AuthenticatedUser:

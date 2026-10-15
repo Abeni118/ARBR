@@ -94,13 +94,52 @@ Recovery requires an available backup, the exact selected verification in `passe
 
 Human-facing `/api` routes (except login, logout, root, health, and API documentation) require authentication. The browser signs in at `POST /api/auth/login` with a configured username/password; the API verifies a PBKDF2-SHA256 password hash and issues a random, opaque session in an `HttpOnly`, `SameSite=Lax` cookie. The raw session identifier is never returned in JSON and only its SHA-256 digest is stored in the database. Sessions expire after 8 hours by default (`MVP_SESSION_TTL_SECONDS`, clamped to 5 minutes–24 hours) and are revoked on logout. Cookie-authenticated state-changing requests require a separate double-submit CSRF token (`arbr_csrf` cookie plus `X-CSRF-Token` header); login requests with an Origin are restricted to `CORS_ALLOWED_ORIGINS`.
 
-Configure login identities using `MVP_USER_CREDENTIALS`, a JSON array with `username`, stable `user_id`, `role`, `password_hash`, and optional `display_name`. Never put plaintext passwords or real hashes in source control. Generate a hash interactively from `backend/` with `python scripts/create_user_credential.py`; the helper prompts for the password without echoing it and prints one JSON entry to place in a protected environment/secret store. For local HTTP development only, set `AUTH_COOKIE_SECURE=false`; leave the default `true` for HTTPS deployments. Set `CORS_ALLOWED_ORIGINS` to the exact comma-separated frontend origins when they differ from `http://localhost:5173`.
+Configure login identities using `MVP_USER_CREDENTIALS`, a JSON array with `username`, stable `user_id`, `role`, `password_hash`, and optional `display_name`. Never put plaintext passwords or real hashes in source control. Generate a hash interactively from `backend/` with `python scripts/create_user_credential.py`; the helper prompts for the password without echoing it and prints one JSON entry to place in a protected environment/secret store. For local HTTP development only, set `AUTH_COOKIE_SECURE=false`; leave the default `true` for HTTPS deployments. The default trusted frontend origins are `http://localhost:5173` and `http://localhost:5174` (Vite's fallback when 5173 is occupied). Set `CORS_ALLOWED_ORIGINS` to the exact comma-separated frontend origins for other development or deployment addresses.
 
 For local use, create a credential entry with the helper, configure `MVP_USER_CREDENTIALS` in the API process environment (preserving any other configured users), and run `set -a; source .env; set +a; uvicorn app.main:app --reload` from this directory when storing settings in the ignored, owner-only `.env` file. Start the Vite frontend from `frontend/` with `npm install` (first run only) and `npm run dev`; then open `http://localhost:5173`. `POST /api/auth/login` establishes the session, `GET /api/auth/me` restores it after reload, and `POST /api/auth/logout` revokes it. `POST /api/auth/change-password` verifies the current password, stores the new PBKDF2-SHA256 hash in the database, and revokes all active sessions. The frontend includes a Change password link. The frontend keeps only the non-authenticating CSRF nonce in memory; no token/password is stored in a Vite variable or browser storage.
 
 The prior `MVP_USER_TOKENS` environment-configured Bearer credentials remain supported for existing scripts and integrations. They are not used by browser login and are not exposed to the frontend. Never commit real token values. Missing or invalid credentials return `401`; authenticated users without a required role receive `403`.
 
-Roles are `viewer` (authenticated reads), `analyst` (reads plus asset registration and analyst workflow/lifecycle operations), `approver` (reads plus ActionRequest approval/rejection), and `admin` (all human-user operations; settings is currently read-only). Admin authority does not bypass requester/approver separation: the authenticated requester cannot approve or reject their own ActionRequest. Caller-provided actor IDs are not authoritative; audit attribution and stored human actor fields use the authenticated principal.
+The prior `MVP_USER_TOKENS` environment-configured Bearer credentials remain supported for existing scripts and integrations. They are not used by browser login and are not exposed to the frontend. Never commit real token values. Missing or invalid credentials return `401`; authenticated users without a required role receive `403`.
+
+### Public Sign Up & Account Registration
+Public registration is supported at `POST /api/auth/register`. To maintain defense-in-depth and least-privilege access:
+- Public accounts are automatically assigned the least-privileged `viewer` role.
+- Public users cannot choose their role or self-escalate to `admin`, `analyst`, or `approver`. Any payload attempting role escalation is rejected (HTTP 422).
+- Passwords must be at least 12 characters and are stored only as secure PBKDF2-SHA256 hashes (600,000 iterations).
+- Duplicate usernames (case-insensitive) are rejected with HTTP 409 Conflict.
+- All registrations are audited in the append-only audit trail (`user_account.registered`).
+
+### Administrative Interface & Account Governance
+Authorized administrators (`role: admin`) access the administrative backend through:
+- `GET /api/users`: Lists all accounts (both database-provisioned and environment-configured identities), displaying safe metadata without exposing password hashes or credentials.
+- `GET /api/users/{user_id}`: Retrieves specific account details safely.
+- `POST /api/users`: Allows administrators to provision operations accounts (`viewer`, `analyst`, `approver`).
+- `PATCH /api/users/{user_id}`: Allows administrators to update roles (`viewer`, `analyst`, `approver`, `admin`) and activate/deactivate accounts (`is_active: bool`). Deactivating an account or altering its role immediately invalidates active sessions.
+- **Last Administrator Protection**: The backend verifies total active administrators across both configured and database identities. Any administrative operation that would deactivate or demote the last remaining active administrator is strictly rejected (HTTP 400 with code `cannot_remove_last_admin`).
+- `GET /api/admin/overview`: Provides consolidated real metrics covering user directory totals, database health, Wazuh integration status (clearly distinguishing configured from unavailable), backup/recovery statistics, and recent administrative audit events.
+
+### Initial Administrator Provisioning Procedure
+If no administrator account exists, authorized operators can bootstrap the first administrator safely without hardcoded default credentials or public elevation endpoints using the bootstrap CLI utility:
+
+```bash
+# Interactive mode (prompts securely for password without echo)
+PYTHONPATH=backend python backend/scripts/bootstrap_admin.py
+
+# Non-interactive / scriptable mode
+PYTHONPATH=backend python backend/scripts/bootstrap_admin.py --username admin --password "StrongPasswordAtLeast12Chars" --display-name "System Administrator"
+```
+
+This procedure:
+1. Validates username pattern and password length (minimum 12 characters).
+2. Hashes the password using PBKDF2-SHA256.
+3. Inserts or updates the administrator in `user_accounts` with `role="admin"` and `is_active=True`.
+4. Records an audit event (`user_account.bootstrapped`).
+5. Runs safely without deleting or altering other existing records.
+
+Alternatively, operators may generate a credentials entry for `MVP_USER_CREDENTIALS` using `python backend/scripts/create_user_credential.py`.
+
+Roles are `viewer` (authenticated reads), `analyst` (reads plus asset registration and analyst workflow/lifecycle operations), `approver` (reads plus ActionRequest approval/rejection), and `admin` (all human-user operations). Authenticated users can read settings; only `admin` can update active risk thresholds through `PUT /api/settings` or manage accounts. Risk threshold updates are used when classifying newly created risk assessments; existing assessments are not rewritten. Other policy JSON columns have no active consumer and are read-only through the current settings API/UI; no controls imply that those policies change execution. Admin authority does not bypass requester/approver separation: the authenticated requester cannot approve or reject their own ActionRequest. Caller-provided actor IDs are not authoritative; audit attribution and stored human actor fields use the authenticated principal.
 
 Human Bearer authentication is separate from trusted internal component reporting. Internal endpoints use `X-Internal-Component-Token`; a human token cannot substitute for a component token.
 

@@ -2,13 +2,18 @@
 Entrypoint for the detection service.
 
 Usage:
-    python -m detector.main --tail            # follow live alerts.json
-    python -m detector.main --replay sample.json   # process a file once (testing)
+    python -m detector.main --tail                       # follow live alerts.json
+    python -m detector.main --replay sample.json         # process a file once (testing)
+    python -m detector.main --replay sample.json --sink api   # send to the backend API
+
+Sinks:
+    db   (default) write to the shared MySQL `detections` table, falling back to
+         detections.jsonl when the DB is unreachable.
+    api  POST each detection to the backend (/api/internal/security-events).
+         Needs DETECTOR_API_TOKEN (and an existing asset, see README_DETECTION.md).
 
 The --tail mode is meant to run on/near the Wazuh manager (or wherever
-alerts.json is accessible). In a real deployment this would more likely
-subscribe to the Wazuh API's alert stream or a message queue instead of
-tailing a local file - swap the source in run() when that's available.
+alerts.json is accessible).
 """
 import argparse
 import json
@@ -17,7 +22,6 @@ import time
 
 from . import config
 from .processor import process_alert
-from .sink import DetectionSink
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,7 +50,7 @@ def _iter_file_lines(path: str):
                 yield line
 
 
-def run(lines_iter, sink: DetectionSink):
+def run(lines_iter, sink):
     for line in lines_iter:
         line = line.strip()
         if not line:
@@ -56,10 +60,18 @@ def run(lines_iter, sink: DetectionSink):
         except json.JSONDecodeError:
             continue
         for detection in process_alert(alert):
-            sink.write(detection)
-            log.info("Detection written: %s (%s, %s)",
+            result = sink.write(detection)
+            log.info("Detection %s (%s, %s) -> %s",
                       detection.detection_id, detection.detection_type,
-                      detection.severity)
+                      detection.severity, result or "written")
+
+
+def make_sink(name: str):
+    if name == "api":
+        from .api_sink import ApiSink
+        return ApiSink()
+    from .sink import DetectionSink
+    return DetectionSink()
 
 
 def main():
@@ -70,18 +82,22 @@ def main():
                          help="Process a JSON-lines alert file once, then exit")
     parser.add_argument("--alerts-path", default=config.ALERTS_JSON_PATH,
                          help="Path to alerts.json (default: %(default)s)")
+    parser.add_argument("--sink", choices=("db", "api"), default="db",
+                         help="Where to send detections (default: %(default)s)")
     args = parser.parse_args()
 
-    sink = DetectionSink()
+    if not (args.replay or args.tail):
+        parser.print_help()
+        return
+
+    sink = make_sink(args.sink)
 
     if args.replay:
         log.info("Replaying alerts from %s", args.replay)
         run(_iter_file_lines(args.replay), sink)
-    elif args.tail:
+    else:
         log.info("Tailing %s for new alerts...", args.alerts_path)
         run(_iter_new_lines(args.alerts_path), sink)
-    else:
-        parser.print_help()
 
 
 if __name__ == "__main__":
