@@ -21,6 +21,7 @@ from app.services.user_auth import (
     UserRole,
     authenticate_password,
     cookie_secure,
+    cookie_samesite,
     change_user_password,
     get_session_csrf_token,
     get_current_user,
@@ -125,7 +126,7 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
         max_age=ttl_seconds,
         httponly=True,
         secure=secure,
-        samesite="lax",
+        samesite=cookie_samesite(),
         path="/",
     )
     response.set_cookie(
@@ -134,7 +135,7 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
         max_age=ttl_seconds,
         httponly=False,
         secure=secure,
-        samesite="lax",
+        samesite=cookie_samesite(),
         path="/",
     )
     return _authenticated_user(user, csrf_token)
@@ -162,8 +163,8 @@ def logout(request: Request, db: Session = Depends(get_db)):
         )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     secure = cookie_secure()
-    response.delete_cookie(SESSION_COOKIE_NAME, path="/", secure=secure, httponly=True, samesite="lax")
-    response.delete_cookie(CSRF_COOKIE_NAME, path="/", secure=secure, httponly=False, samesite="lax")
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/", secure=secure, httponly=True, samesite=cookie_samesite())
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/", secure=secure, httponly=False, samesite=cookie_samesite())
     return response
 
 
@@ -183,6 +184,6 @@ def change_password(
         )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     secure = cookie_secure()
-    response.delete_cookie(SESSION_COOKIE_NAME, path="/", secure=secure, httponly=True, samesite="lax")
-    response.delete_cookie(CSRF_COOKIE_NAME, path="/", secure=secure, httponly=False, samesite="lax")
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/", secure=secure, httponly=True, samesite=cookie_samesite())
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/", secure=secure, httponly=False, samesite=cookie_samesite())
     return response

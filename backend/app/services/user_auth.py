@@ -331,6 +331,11 @@ def revoke_user_session(db: Session, request: Request) -> bool:
 def cookie_secure() -> bool:
     return os.getenv("AUTH_COOKIE_SECURE", "true").strip().lower() not in {"0", "false", "no"}
 
+def cookie_samesite() -> str:
+    value = os.getenv("AUTH_COOKIE_SAMESITE", "lax").strip().lower()
+    if value not in {"lax", "strict", "none"}:
+        return "lax"
+    return value
 
 def validate_login_origin(request: Request) -> bool:
     """Reject browser login submissions originating outside configured UI origins."""
