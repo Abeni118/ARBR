@@ -276,19 +276,46 @@ export function ThreatDetectionPage({ globalSearch, onGlobalSearchChange }) {
   </main>
 }
 
-export function RiskAnalysisPage({ globalSearch = '' }) {
-  const { data, loading, error } = useApiResource('/risk-assessments?page=1&page_size=100')
+function riskLevelTone(level) {
+  const value = String(level || '').toLowerCase()
+  if (value === 'critical' || value === 'high') return 'red'
+  if (value === 'medium') return 'amber'
+  if (value === 'low' || value === 'info') return 'green'
+  return 'cyan'
+}
+
+export function RiskAnalysisPage({ globalSearch = '', onGlobalSearchChange }) {
+  const [refresh, setRefresh] = useState(0)
+  const { data, loading, error } = useApiResource('/risk-assessments?page=1&page_size=100', refresh)
   const rows = data?.items || []
   const visible = rows.filter((row) => !globalSearch.trim() || [row.id, row.incident_id, row.asset_id, row.score, row.risk_level, row.status, row.factors, row.correlation_id].some((value) => String(value || '').toLowerCase().includes(globalSearch.trim().toLowerCase())))
   const latest = rows[0]
   const history = [...rows].reverse().map((row) => ({ time: formatTimestamp(row.assessed_at), score: row.score }))
   const assets = [...new Set(rows.map((row) => row.asset_id))]
+  const retry = () => setRefresh((value) => value + 1)
   return <main className="risk-analysis-main"><PageHeading title="Risk Analysis" description="Risk assessments and contributing factors as actually returned by the API." />
-    <section className="risk-summary-grid"><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Latest Risk Score</span><strong>{latest ? `${latest.score} / 100` : 'No records'}</strong><span>{latest?.risk_level || 'No assessments returned'}</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Assessments</span><strong>{data?.total ?? '—'}</strong><span>Total returned by API</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Latest Assessment</span><strong>{latest ? formatTimestamp(latest.assessed_at) : 'No records'}</strong><span>Backend assessment timestamp</span></div></article><article className="risk-summary-card"><div className="risk-summary-copy"><span className="eyebrow">Assets Represented</span><strong>{assets.length || '—'}</strong><span>In the loaded assessment page only</span></div></article></section>
-    <div className="risk-overview-grid"><section className="panel risk-score-panel"><header className="risk-section-heading"><div><h2>Latest Risk Assessment</h2><p>One backend assessment; no aggregate score is inferred.</p></div>{latest && <span className={`severity severity--${statusClass(latest.risk_level)}`}>{latest.risk_level}</span>}</header><div className="api-risk-latest">{latest ? <><strong>{latest.score}</strong><span>/ 100 · assessment {latest.id}</span><dl className="event-detail-grid"><ApiDetail label="Incident ID" value={latest.incident_id} /><ApiDetail label="Asset ID" value={latest.asset_id} /><ApiDetail label="Confidence" value={latest.confidence} /><ApiDetail label="Status" value={latest.status} /><ApiDetail label="Model version" value={latest.model_version} /><ApiDetail label="Policy version" value={latest.policy_version} /></dl></> : <div className="api-unavailable">No assessment records returned.</div>}</div></section>
-      <section className="panel risk-history-panel"><header className="risk-section-heading"><div><h2>Risk Assessment History</h2><p>Scores from the loaded API page, ordered by assessment time.</p></div></header>{history.length > 1 ? <div className="risk-history-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={history}><CartesianGrid vertical={false} stroke="#30343d" strokeDasharray="2 5" /><XAxis dataKey="time" /><YAxis domain={[0, 100]} /><Tooltip /><Line dataKey="score" stroke="#09c7d8" dot={false} /></LineChart></ResponsiveContainer></div> : <div className="api-unavailable">At least two assessments are required for a history chart.</div>}</section></div>
-    <section className="panel risk-table-panel"><header className="risk-section-heading"><div><h2>Risk Assessments</h2><p>Factors are displayed in the form supplied by the backend.</p></div></header><ApiState loading={loading} error={error} empty={!loading && !error && visible.length === 0 ? 'No risk assessments match the current search.' : null}>{visible.length > 0 && <ApiTable headings={['Assessment ID', 'Incident ID', 'Asset ID', 'Score', 'Risk Level', 'Status', 'Assessed At', 'Factors', 'Correlation ID']} className="risk-table-scroll">{visible.map((row) => <tr key={row.id}><td>{row.id}</td><td>{row.incident_id}</td><td>{row.asset_id}</td><td>{row.score}</td><td>{row.risk_level}</td><td>{row.status}</td><td>{formatTimestamp(row.assessed_at)}</td><td>{row.factors.length ? displayValue(row.factors) : 'None provided'}</td><td>{row.correlation_id}</td></tr>)}</ApiTable>}</ApiState></section>
-    <section className="panel recommended-response"><div><h2>Recommended Response</h2><p>Recommendations are not part of the RiskAssessment response schema.</p></div></section>
+    <ApiState loading={loading} error={error} onRetry={retry}>
+      {data && <>
+        <section className="risk-summary-grid" aria-label="Risk assessment summary">
+          {[
+            ['Latest Risk Score', latest ? `${latest.score} / 100` : 'No records', latest?.risk_level || 'No assessments returned', AlertTriangle, riskLevelTone(latest?.risk_level)],
+            ['Assessments', data.total ?? '—', 'Total returned by API', Activity, 'cyan'],
+            ['Latest Assessment', latest ? formatTimestamp(latest.assessed_at) : 'No records', 'Backend assessment timestamp', CalendarDays, 'amber'],
+            ['Assets Represented', assets.length || '—', 'In the loaded assessment page only', Database, 'green'],
+          ].map(([label, value, support, Icon, tone]) => <article className={`risk-summary-card risk-summary-card--${tone}`} key={label}><div className="risk-summary-copy"><span className="eyebrow">{label}</span><strong>{value}</strong><span className="risk-summary-support">{support}</span></div><div className="risk-summary-icon"><Icon size={17} strokeWidth={1.8} /></div></article>)}
+        </section>
+        <div className="risk-overview-grid">
+          <section className="panel risk-history-panel"><header className="risk-section-heading"><div><h2>Risk Assessment History</h2><p>Scores from the loaded API page, ordered by assessment time.</p></div><div className="chart-legend"><span><i className="legend-dot" />Score</span></div></header>{history.length > 1 ? <div className="risk-history-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={history} margin={{ top: 10, right: 8, bottom: 0, left: -12 }}><CartesianGrid vertical={false} stroke="#30343d" strokeDasharray="2 5" /><XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#9298a4', fontSize: 9, fontFamily: 'ui-monospace, monospace' }} dy={8} /><YAxis domain={[0, 100]} allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: '#9298a4', fontSize: 9, fontFamily: 'ui-monospace, monospace' }} /><Tooltip contentStyle={{ border: '1px solid #384253', borderRadius: 2, color: '#dce3ec', background: '#131e33', fontSize: 9 }} /><Line type="monotone" dataKey="score" name="Score" stroke="#09c7d8" strokeWidth={1.7} dot={false} activeDot={{ r: 3, fill: '#09c7d8', stroke: '#101a34', strokeWidth: 2 }} /></LineChart></ResponsiveContainer></div> : <div className="api-unavailable">At least two assessments are required for a history chart.</div>}</section>
+          <section className="panel risk-score-panel"><header className="risk-section-heading"><div><h2>Latest Risk Assessment</h2><p>One backend assessment; no aggregate score is inferred.</p></div>{latest && <span className={`severity severity--${statusClass(latest.risk_level)}`}>{latest.risk_level}</span>}</header><div className="api-risk-latest">{latest ? <><strong>{latest.score}</strong><span>/ 100 · assessment {latest.id}</span><dl className="event-detail-grid"><ApiDetail label="Incident ID" value={latest.incident_id} /><ApiDetail label="Asset ID" value={latest.asset_id} /><ApiDetail label="Confidence" value={latest.confidence} /><ApiDetail label="Status" value={latest.status} /><ApiDetail label="Model version" value={latest.model_version} /><ApiDetail label="Policy version" value={latest.policy_version} /></dl></> : <div className="api-unavailable">No assessment records returned.</div>}</div></section>
+        </div>
+        <section className="panel risk-table-panel"><header className="risk-section-heading"><div><h2>Risk Assessments</h2><p>Factors are displayed in the form supplied by the backend.</p></div></header>
+          <div className="risk-filter-bar"><label className="event-search"><span className="sr-only">Search</span><input type="search" value={globalSearch || ''} onChange={(event) => onGlobalSearchChange?.(event.target.value)} placeholder="Search returned fields" /></label></div>
+          <ApiState empty={visible.length === 0 ? 'No risk assessments match the current search.' : null}>{visible.length > 0 && <ApiTable headings={['Assessment ID', 'Incident ID', 'Asset ID', 'Score', 'Risk Level', 'Status', 'Assessed At', 'Factors', 'Correlation ID']} className="risk-table-scroll">{visible.map((row) => <tr key={row.id}><td className="event-id">{row.id}</td><td>{row.incident_id}</td><td>{row.asset_id}</td><td>{row.score}</td><td><ValueBadge value={row.risk_level} className="severity" /></td><td>{row.status}</td><td>{formatTimestamp(row.assessed_at)}</td><td>{row.factors.length ? displayValue(row.factors) : 'None provided'}</td><td>{row.correlation_id}</td></tr>)}</ApiTable>}</ApiState>
+        </section>
+        <section className="panel recommended-response"><header className="risk-section-heading"><div><h2>Recommended Response</h2><p>Recommendations are not part of the RiskAssessment response schema.</p></div></header></section>
+      </>}
+    </ApiState>
+    <footer className="status-footer"><span>Risk scores and factors are taken from persisted backend assessments.</span></footer>
   </main>
 }
 

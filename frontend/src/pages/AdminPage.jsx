@@ -591,6 +591,41 @@ export default function AdminPage() {
         </section>
       )}
 
+
+          {/* DEMO SECURITY EVENTS — PRESENTATION ONLY */}
+          <div className="admin-metric-card" style={{ marginTop: '16px', padding: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, color: '#edf1f8', fontFamily: 'var(--mono)', fontSize: '12px' }}>
+                Recent Security Events
+              </h3>
+              <span style={{ color: '#f4bd50', fontSize: '10px', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 7px' }}>
+                DEMO DATA · PRESENTATION ONLY
+              </span>
+            </div>
+            <p style={{ color: '#8c97a8', fontSize: '10px', margin: '8px 0 12px' }}>
+              Illustrative examples only — not live Wazuh alerts.
+            </p>
+            <div style={{ display: 'grid', gap: '8px' }}>
+              {[
+                { title: 'Suspicious bulk file modifications', detail: 'Multiple files changed in a short period', severity: 'High', color: '#ff6470', bg: 'rgba(239,62,76,0.12)' },
+                { title: 'Repeated failed login attempts', detail: 'Several authentication failures', severity: 'Medium', color: '#f4bd50', bg: 'rgba(244,189,80,0.12)' },
+                { title: 'Unusual file access activity', detail: 'Access pattern differs from normal usage', severity: 'Low', color: '#70b7ff', bg: 'rgba(112,183,255,0.12)' },
+                { title: 'Backup integrity verification failure', detail: 'Sample backup failed verification', severity: 'High', color: '#ff6470', bg: 'rgba(239,62,76,0.12)' },
+                { title: 'Unusual outbound network activity', detail: 'Outbound traffic is above the baseline', severity: 'Medium', color: '#f4bd50', bg: 'rgba(244,189,80,0.12)' },
+              ].map((event) => (
+                <div key={event.title} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', padding: '11px 12px', border: '1px solid var(--border)', borderRadius: '6px' }}>
+                  <div style={{ flex: '1 1 230px' }}>
+                    <div style={{ color: '#edf1f8', fontSize: '11px', marginBottom: '4px' }}>{event.title}</div>
+                    <div style={{ color: '#8c97a8', fontSize: '10px' }}>{event.detail}</div>
+                  </div>
+                  <span style={{ color: event.color, background: event.bg, border: `1px solid ${event.color}66`, borderRadius: '4px', padding: '4px 9px', fontSize: '10px', fontWeight: 700 }}>
+                    {event.severity}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
       {/* TAB 3: AUDIT & POLICIES */}
       {activeTab === 'audit' && (
         <section aria-label="Audit & Policies">
