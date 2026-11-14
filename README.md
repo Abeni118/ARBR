@@ -1,39 +1,34 @@
-# Attack-Resistant Backup and Recovery System
 
-A cybersecurity system that protects an organization’s critical data from ransomware and other cyber threats by monitoring files and backups, detecting and analyzing suspicious activity, protecting and isolating data, and providing recovery options from verified, safe backups.
+# ARBR – Attack-Resistant Backup & Recovery System
 
-## The Problem
+> ⚠️ **IMPORTANT NOTICE: THIS IS NOT THE OFFICIAL PROJECT REPOSITORY.**
 
-Cybersecurity threats such as ransomware can target enterprise files and encryption keys, rendering data inaccessible through encryption or deletion. In addition, ransomware may target and destroy backup files, rendering data recovery unrecoverable.
+This repository is a cloned copy of the original ARBR project, maintained solely for **project video presentation and demonstration purposes**.
 
-Enterprises need an attack-resistant cybersecurity system that detects and analyzes ransomware and other malicious activity, protects backup data, isolates affected systems, and restores files from protected, verified backups.
+The official source code, project development, and original repository are maintained here:
 
-## Project Goal
-The goal of this project is to design a system that
-1. Detects ransomware and other file-encrypting malware through behavioral analysis of file access and modification patterns,
-2. Protects enterprise files and backups through isolation and tamper-protection mechanisms,
+### Official Project Repository
 
-3. Analyzes and prioritizes security threats based on risk values,
-4. Verifies the integrity of backup data to be used for enterprise file recovery,
-5. Recovers files from safely isolated, unaltered data backups in response to detected ransomware attacks, and
-6. Records relevant events for auditing and forensics.
-The proposed solution addresses ransomware and cybersecurity threats by monitoring, detecting, analyzing, protecting, isolating, verifying, and recovering data according to the automated procedure in Figure 1 below:
-```
-Figure 1: Cybersecurity and Data Recovery Procedure
+🔗 **[Attack-Resistant Backup & Recovery System – Official Repository](https://github.com/total64/attack-resistant-backup-recovery)**
 
-Monitor
-↓
-Detect
-↓
-Analyze Risk
-↓
-Protect Backup
-↓
-Isolate
-↓
-Verify Backup
-↓
-Recover
-↓
-Report
-```
+Please visit the official repository for the original project, source code, documentation, updates, and development history.
+
+---
+
+## Project Presentation
+
+This repository includes a video demonstration of the ARBR project.
+
+**Presentation video:** `Video presentation/ARBR-presentation.mp4`
+
+---
+
+## Contributor
+
+| No. | Name | ID | GitHub |
+|---|---|---|---|
+| 1 | Abenezer Tekalign | CTC-7212-26 | [@Abeni118](https://github.com/Abeni118) |
+
+---
+
+**Reminder:** This repository is an unofficial presentation copy. The official project repository is maintained at [total64/attack-resistant-backup-recovery](https://github.com/total64/attack-resistant-backup-recovery).
