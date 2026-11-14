@@ -19,7 +19,7 @@ Please visit the official repository for the original project, source code, docu
 
 This repository includes a video demonstration of the ARBR project.
 
-**Presentation video:** **[Video](https://github.com/Abeni118/ARBR/tree/main/Video%20presentation)
+**Presentation video:** **[Click Here](https://github.com/Abeni118/ARBR/tree/main/Video%20presentation)**
 
 ---
 
